@@ -1,0 +1,837 @@
+{
+ "responses": {
+  "notifications?page=1&participating=true&per_page=50&since=SINCE": [
+   {
+    "id": "1001",
+    "reason": "mention",
+    "repository": {
+     "full_name": "acme/widgets",
+     "html_url": "https://github.com/acme/widgets"
+    },
+    "subject": {
+     "title": "Flaky test in the widget suite",
+     "url": "https://api.github.com/repos/acme/widgets/issues/12"
+    },
+    "updated_at": "2026-01-05T10:00:00Z"
+   }
+  ],
+  "repos/acme/widgets/issues/388": {
+   "assignees": [],
+   "comments": 0,
+   "html_url": "https://github.com/acme/widgets/issues/388",
+   "labels": [],
+   "number": 388,
+   "state": "closed",
+   "title": "Document the retry flag"
+  },
+  "repos/acme/widgets/issues/388/timeline?page=1&per_page=100": [],
+  "repos/acme/widgets/issues/390": {
+   "assignees": [],
+   "comments": 100,
+   "html_url": "https://github.com/acme/widgets/issues/390",
+   "labels": [
+    {
+     "name": "bug"
+    }
+   ],
+   "number": 390,
+   "state": "open",
+   "title": "Widget spins forever on an empty config"
+  },
+  "repos/acme/widgets/issues/390/comments?page=1&per_page=100": [
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (1)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (2)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (3)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (4)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (5)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (6)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (7)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (8)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (9)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (10)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (11)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (12)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (13)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (14)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (15)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (16)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (17)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (18)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (19)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (20)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (21)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (22)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (23)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (24)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (25)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (26)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (27)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (28)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (29)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (30)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (31)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (32)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (33)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (34)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (35)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (36)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (37)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (38)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (39)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (40)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (41)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (42)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (43)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (44)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (45)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (46)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (47)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (48)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (49)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (50)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (51)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (52)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (53)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (54)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (55)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (56)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (57)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (58)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (59)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (60)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (61)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (62)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (63)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (64)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (65)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (66)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (67)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (68)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (69)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (70)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (71)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (72)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (73)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (74)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (75)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (76)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (77)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (78)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (79)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (80)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (81)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (82)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (83)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (84)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (85)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (86)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (87)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (88)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (89)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (90)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (91)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (92)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (93)",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (94)",
+    "user": {
+     "login": "user3"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (95)",
+    "user": {
+     "login": "user4"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (96)",
+    "user": {
+     "login": "user5"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (97)",
+    "user": {
+     "login": "user6"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (98)",
+    "user": {
+     "login": "user0"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (99)",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Seeing this too (100)",
+    "user": {
+     "login": "user2"
+    }
+   }
+  ],
+  "repos/acme/widgets/issues/390/comments?page=2&per_page=100": [],
+  "repos/acme/widgets/issues/390/timeline?page=1&per_page=100": [
+   {
+    "event": "cross-referenced",
+    "source": {
+     "issue": {
+      "body": "Related to #390",
+      "html_url": "https://github.com/acme/widgets/issues/350",
+      "number": 350,
+      "user": {
+       "login": "user3"
+      }
+     }
+    }
+   }
+  ],
+  "repos/acme/widgets/issues/392": {
+   "assignees": [],
+   "comments": 0,
+   "html_url": "https://github.com/acme/widgets/pull/392",
+   "labels": [],
+   "number": 392,
+   "pull_request": {
+    "url": "https://api.github.com/repos/acme/widgets/pulls/392"
+   },
+   "state": "open",
+   "title": "Add retry backoff"
+  },
+  "repos/acme/widgets/issues/392/timeline?page=1&per_page=100": [],
+  "repos/acme/widgets/issues/395": {
+   "assignees": [],
+   "comments": 3,
+   "html_url": "https://github.com/acme/widgets/issues/395",
+   "labels": [],
+   "number": 395,
+   "state": "open",
+   "title": "[Community] Weekly sync thread"
+  },
+  "repos/acme/widgets/issues/395/comments?page=1&per_page=100": [
+   {
+    "author_association": "NONE",
+    "body": "Agenda item: release notes",
+    "user": {
+     "login": "user1"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "I can take the changelog",
+    "user": {
+     "login": "user2"
+    }
+   },
+   {
+    "author_association": "NONE",
+    "body": "Need a task",
+    "user": {
+     "login": "user4"
+    }
+   }
+  ],
+  "repos/acme/widgets/issues/395/timeline?page=1&per_page=100": [],
+  "repos/acme/widgets/pulls/392": {
+   "merged": false
+  },
+  "repos/acme/widgets/pulls/392/reviews?page=1&per_page=100": [],
+  "search/issues?page=1&per_page=100&q=repo:acme/widgets involves:octocat is:closed updated:>=DATE": {
+   "incomplete_results": false,
+   "items": [
+    {
+     "number": 388
+    }
+   ],
+   "total_count": 1
+  },
+  "search/issues?page=1&per_page=100&q=repo:acme/widgets involves:octocat is:open": {
+   "incomplete_results": false,
+   "items": [
+    {
+     "number": 390
+    },
+    {
+     "number": 392
+    },
+    {
+     "number": 395
+    }
+   ],
+   "total_count": 3
+  },
+  "user": {
+   "login": "octocat"
+  }
+ }
+}

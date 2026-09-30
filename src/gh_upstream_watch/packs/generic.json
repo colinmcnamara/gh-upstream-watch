@@ -1,0 +1,11 @@
+{
+  "id": "generic",
+  "description": "Defaults for every repo: next-action wording for assignment, reopen and competing PRs.",
+  "repos": ["*"],
+  "messages": {
+    "assigned": "ASSIGNED to you",
+    "reopened": "REOPENED: claim it",
+    "competing_pr": "COMPETING PR #{number} (by @{author}) says Closes #{target}: check scope",
+    "reference": "referenced by @{author}'s {kind} #{number}"
+  }
+}

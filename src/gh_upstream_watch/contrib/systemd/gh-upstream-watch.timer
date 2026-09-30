@@ -1,0 +1,11 @@
+[Unit]
+Description=Run gh-upstream-watch every ${interval_minutes} minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=${interval_minutes}min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+# Enable with: systemctl --user daemon-reload && systemctl --user enable --now gh-upstream-watch.timer

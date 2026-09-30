@@ -1,0 +1,18 @@
+{
+ "acme/widgets#390": {"title": "Widget spins forever on an empty config", "url": "https://github.com/acme/widgets/issues/390",
+  "pr": false, "state": "open", "labels": ["bug"], "assignees": [], "comments": 100, "human_comments": 100,
+  "mentions_me": 0, "accepted": false, "assign_asked": false,
+  "xrefs": [["https://github.com/acme/widgets/issues/350", "issue", "user3", false]]},
+ "acme/widgets#392": {"title": "Add retry backoff", "url": "https://github.com/acme/widgets/pull/392",
+  "pr": true, "state": "open", "labels": [], "assignees": [], "comments": 0, "human_comments": 0,
+  "mentions_me": 0, "accepted": false, "assign_asked": false, "xrefs": [], "merged": false, "reviews": []},
+ "acme/widgets#388": {"title": "Document the retry flag", "url": "https://github.com/acme/widgets/issues/388",
+  "pr": false, "state": "closed", "labels": [], "assignees": [], "comments": 0, "human_comments": 0,
+  "mentions_me": 0, "accepted": true, "assign_asked": true, "xrefs": []},
+ "acme/widgets#395": {"title": "[Community] Weekly sync thread", "url": "https://github.com/acme/widgets/issues/395",
+  "pr": false, "state": "open", "labels": [], "assignees": [], "comments": 3, "human_comments": 3,
+  "mentions_me": 0, "accepted": false, "assign_asked": false, "xrefs": []},
+ "_notifications": {"_seeded": true, "1001": "2026-01-05T10:00:00Z"},
+ "_slack": {"last": 1767000000.0, "seen": {"#general:1767000000.000100": true}},
+ "_claimable": {"seen": {"3613": true}}
+}

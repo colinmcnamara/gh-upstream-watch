@@ -1,0 +1,38 @@
+{
+  "id": "vllm-semantic-router",
+  "description": "vllm-project/semantic-router: /accept gate, then /assign; workgroup claim board. Only OWNER and COLLABORATOR count by default; for a tighter gate, copy this pack to your packs dir and list the maintainer logins in authorized_by.logins.",
+  "repos": ["vllm-project/semantic-router"],
+  "gates": [
+    {
+      "id": "accept",
+      "comment": "^/accept\\b",
+      "authorized_by": {"associations": ["OWNER", "COLLABORATOR"], "logins": []},
+      "then": "^/assign\\b",
+      "alert": "ACCEPTED by @{actor}: comment /assign now",
+      "alert_done": "ACCEPTED by @{actor}"
+    }
+  ],
+  "label_transitions": [
+    {
+      "id": "in-progress-missing",
+      "assigned_to_me": true,
+      "has": ["accepted"],
+      "lacks": ["in-progress"],
+      "alert": "IN-PROGRESS label missing: ask a maintainer once, in one line naming the cause"
+    }
+  ],
+  "quiet_titles": ["^\\[(WG|Community)\\]"],
+  "messages": {
+    "assigned": "ASSIGNED to you: implementation may start",
+    "reopened": "REOPENED: comment /assign now",
+    "competing_pr": "COMPETING PR #{number} (by @{author}) says Closes #{target}: check scope before /assign"
+  },
+  "claimable": {
+    "search": "is:issue is:open in:title \"Workgroup Issues\"",
+    "title": "^\\[Community\\] Workgroup Issues",
+    "comment_marker": "<!-- workgroup-operations:weekly-wg:{group} -->",
+    "section": "### Available issues",
+    "row": "^\\|\\s*AVAILABLE\\s*\\|\\s*\\[#(?P<number>\\d+) (?P<title>[^\\]]+)\\]\\((?P<url>\\S+?)\\)",
+    "alert": "CLAIMABLE in wg/{group}: /assign now"
+  }
+}

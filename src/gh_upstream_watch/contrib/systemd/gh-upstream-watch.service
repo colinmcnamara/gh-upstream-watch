@@ -1,0 +1,7 @@
+[Unit]
+Description=gh-upstream-watch: one read-only pass over your upstream work
+
+[Service]
+Type=oneshot
+Environment=PATH=${path}
+ExecStart=${program}

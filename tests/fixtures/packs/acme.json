@@ -1,0 +1,19 @@
+{
+  "id": "acme",
+  "description": "Synthetic pack for the acme/* demo repos.",
+  "repos": ["acme/*"],
+  "gates": [
+    {
+      "id": "accept",
+      "comment": "^/accept\\b",
+      "authorized_by": {"associations": ["OWNER", "COLLABORATOR"], "logins": []},
+      "then": "^/assign\\b",
+      "alert": "ACCEPTED by @{actor}: comment /assign now",
+      "alert_done": "ACCEPTED by @{actor}"
+    }
+  ],
+  "quiet_titles": ["^\\[Community\\]"],
+  "messages": {
+    "competing_pr": "COMPETING PR #{number} (by @{author}) says Closes #{target}: check scope before /assign"
+  }
+}

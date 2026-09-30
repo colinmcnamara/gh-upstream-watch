@@ -1,0 +1,58 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.12"
+      - run: uv python install ${{ matrix.python }}
+      - run: uv sync --locked --python ${{ matrix.python }}
+      - run: uv run --python ${{ matrix.python }} pytest -q
+      - run: uv run --python ${{ matrix.python }} ruff check .
+      - name: Build, install the wheel into a clean venv, run it
+        run: |
+          uv build
+          uv venv --python ${{ matrix.python }} /tmp/clean
+          uv pip install --python /tmp/clean dist/*.whl
+          /tmp/clean/bin/gh-upstream-watch --help
+          /tmp/clean/bin/gh-upstream-watch --print-plist > /dev/null
+      - name: gh extension shim, run the way `gh extension install` runs it
+        run: |
+          ./gh-upstream-watch --help
+          env python3 ./gh-upstream-watch --help
+      - name: Demo on recorded fixtures
+        run: PYTHON=.venv/bin/python scripts/demo.sh
+
+  hygiene:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Personal-data gate
+        run: scripts/check-personal-data.sh
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.12"
+      - run: uv lock --check
+      - name: Secret scan (full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

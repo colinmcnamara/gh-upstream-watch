@@ -1,0 +1,126 @@
+"""State file: schema v1, one writer at a time, atomic saves, bounded seen stores, v0 migration."""
+import calendar
+import contextlib
+import fcntl
+import json
+import os
+import sys
+import time
+
+SCHEMA = 1
+
+
+class Locked(Exception):
+    pass
+
+
+def empty():
+    return {"schema": SCHEMA, "seeded": False, "items": {}, "notifications": {"seen": {}},
+            "claimable": {"seen": {}}, "slack": {}, "outbox": [], "last_complete": None}
+
+
+def load(path):
+    """The saved state, a fresh one if there is none, or a quarantined-then-fresh one if it is corrupt.
+    A fresh state re-seeds silently, so corruption costs one quiet run, never a flood."""
+    if not os.path.exists(path):
+        return empty()
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("not an object")
+    except ValueError as e:
+        aside = f"{path}.corrupt-{int(time.time())}"
+        os.replace(path, aside)
+        print(f"state: {path} is unreadable ({e}); moved to {aside}, re-seeding quietly", file=sys.stderr)
+        return empty()
+    if "schema" not in data:
+        print(f"state: {path} is v0; migrating in memory", file=sys.stderr)
+        return migrate_v0(data, time.time())
+    if data["schema"] > SCHEMA:
+        raise SystemExit(f"state: {path} has schema {data['schema']}; this version reads {SCHEMA}. Upgrade.")
+    return {**empty(), **data}
+
+
+def save(path, data):
+    """tmp + fsync + rename + fsync(dir): a crash leaves the old file or the new one, never half of one."""
+    d = os.path.dirname(os.path.abspath(path))
+    os.makedirs(d, exist_ok=True)
+    tmp = f"{path}.tmp-{os.getpid()}"
+    # 0600: the state holds titles and URLs from private repos.
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        json.dump(data, f, indent=1, sort_keys=True)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    fd = os.open(d, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+@contextlib.contextmanager
+def lock(path):
+    """Exclusive, non-blocking: a second run while one is in progress exits instead of racing."""
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    fd = os.open(f"{path}.lock", os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            raise Locked(f"{path} is locked by another run")
+        yield
+    finally:
+        os.close(fd)
+
+
+def _epoch(iso):
+    try:
+        return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+    except (TypeError, ValueError):
+        return None
+
+
+def prune(st, now, retention_days, live=()):
+    """Drop seen ids older than the retention window that GitHub no longer returns (`live`).
+    Call only after a complete pass, so a failed run never forgets what it has not re-confirmed,
+    and an id that is still being returned is never forgotten, so it never re-alerts."""
+    cutoff = now - retention_days * 86400
+    n = st["notifications"]["seen"]
+    for k in [k for k, v in n.items() if k not in live and (_epoch(v) or now) < cutoff]:
+        del n[k]
+    for store in (st["claimable"]["seen"], st["slack"].get("seen", {})):
+        for k in [k for k, v in store.items() if k not in live and isinstance(v, (int, float)) and v < cutoff]:
+            del store[k]
+
+
+def migrate_v0(old, now, claim_repo="unknown/unknown"):
+    """v0 (one flat dict: 'owner/repo#n' fingerprints plus _notifications/_slack/_claimable) to v1.
+    Fingerprints and seen ids are kept, so nothing re-alerts and nothing is re-seeded."""
+    st = empty()
+    old = dict(old)
+    notes = dict(old.pop("_notifications", {}))
+    seeded = bool(notes.pop("_seeded", False))
+    st["notifications"]["seen"] = notes
+    slack = old.pop("_slack", {})
+    st["slack"] = {"last": slack.get("last", 0), "seeded": "last" in slack,
+                   "seen": {k: _slack_ts(k, now) for k in slack.get("seen", {})}}
+    claim = old.pop("_claimable", {})
+    # v0 keyed claimable rows by bare number; v1 keys are repo-qualified. The v0 claim board lived
+    # in one repo, passed as claim_repo, so rows keep their identity instead of re-alerting.
+    st["claimable"]["seen"] = {f"{claim_repo}#{k}": now for k in claim.get("seen", {})}
+    for key, fp in old.items():
+        fp = dict(fp)
+        accepted, asked = fp.pop("accepted", False), fp.pop("assign_asked", False)
+        fp["gates"] = {"accept": {"by": "", "done": bool(asked)}} if accepted else {}
+        st["items"][key] = fp
+    st["seeded"] = bool(st["items"]) or seeded
+    return st
+
+
+def _slack_ts(key, now):
+    try:
+        return float(key.rsplit(":", 1)[1])
+    except (IndexError, ValueError):
+        return now

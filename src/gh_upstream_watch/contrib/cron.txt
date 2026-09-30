@@ -1,0 +1,2 @@
+# crontab -e, then add (cron has a minimal PATH, so it is set here; the log directory is created first):
+*/${interval_minutes} * * * * mkdir -p $$HOME/.local/state/gh-upstream-watch && PATH=${path} ${program} >> $$HOME/.local/state/gh-upstream-watch/cron.log 2>&1

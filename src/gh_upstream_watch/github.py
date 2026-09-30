@@ -1,0 +1,84 @@
+"""The only door to GitHub. Every call is `gh api --method GET`; nothing here can write.
+
+Any failure (non-zero exit, bad JSON, timeout, a truncated search, a page cap) raises GHError,
+so callers treat the thing they were checking as unknown for this run instead of empty.
+"""
+import json
+import os
+import subprocess
+
+TIMEOUT = 60
+MAX_PAGES = 30  # 3,000 comments or timeline events per item; beyond that the item stays unknown
+SEARCH_CAP = 1000  # GitHub search never returns more than this
+
+
+class GHError(Exception):
+    pass
+
+
+class Incomplete(GHError):
+    """GitHub answered, but not with everything (incomplete_results, result cap, page cap)."""
+
+
+def gh_binary():
+    return os.environ.get("GH_UPSTREAM_WATCH_GH") or "gh"
+
+
+def _run(argv):
+    try:
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise GHError(f"{argv[4]}: {e}")
+    if proc.returncode != 0:
+        raise GHError(f"{argv[4]}: gh exited {proc.returncode}: {proc.stderr.strip()[:200]}")
+    return proc.stdout
+
+
+def gh_get(path, params=None):
+    """GET one API path. Params go through `-f k=v`, which gh sends as the query string on GET,
+    so search queries are encoded by gh instead of by hand."""
+    argv = [gh_binary(), "api", "--method", "GET", path]
+    for k, v in sorted((params or {}).items()):
+        argv += ["-f", f"{k}={v}"]
+    out = _run(argv)
+    try:
+        return json.loads(out)
+    except ValueError:
+        raise GHError(f"{path}: gh returned invalid JSON")
+
+
+def paginate(path, params=None, per_page=100):
+    """Every page of a list endpoint. One failed page fails the whole list."""
+    out = []
+    for page in range(1, MAX_PAGES + 1):
+        batch = gh_get(path, dict(params or {}, per_page=per_page, page=page))
+        if not isinstance(batch, list):
+            raise GHError(f"{path}: expected a list, got {type(batch).__name__}")
+        out.extend(batch)
+        if len(batch) < per_page:
+            return out
+    raise Incomplete(f"{path}: more than {MAX_PAGES} pages")
+
+
+def search_issues(q, per_page=100, **params):
+    """Every result of an issue search, or Incomplete when GitHub says it is partial."""
+    items = []
+    for page in range(1, SEARCH_CAP // per_page + 1):
+        r = gh_get("search/issues", dict(params, q=q, per_page=per_page, page=page))
+        if r.get("incomplete_results"):
+            raise Incomplete(f"search {q!r}: GitHub returned incomplete_results")
+        if r.get("total_count", 0) > SEARCH_CAP:
+            # ponytail: no query partitioning in v0.1; narrow the repo list if this ever fires.
+            raise Incomplete(f"search {q!r}: {r['total_count']} results exceed the {SEARCH_CAP} cap; "
+                             "narrow --repos (results beyond the cap are invisible)")
+        items.extend(r.get("items", []))
+        if len(r.get("items", [])) < per_page or len(items) >= r.get("total_count", 0):
+            # A short page is only the end if it accounts for every result GitHub counted.
+            if len(items) != r.get("total_count"):
+                raise Incomplete(f"search {q!r}: got {len(items)} of {r.get('total_count')} results")
+            return items
+    raise Incomplete(f"search {q!r}: page cap")
+
+
+def html_url(api_url):
+    return (api_url or "").replace("https://api.github.com/repos/", "https://github.com/").replace("/pulls/", "/pull/")

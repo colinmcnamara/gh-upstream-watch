@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Save as ~/Library/LaunchAgents/local.gh-upstream-watch.plist, then:
+     launchctl bootstrap gui/$$(id -u) ~/Library/LaunchAgents/local.gh-upstream-watch.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.gh-upstream-watch</string>
+  <key>ProgramArguments</key>
+  <array>
+${program_args}
+  </array>
+  <key>StartInterval</key>
+  <integer>${interval_seconds}</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${path}</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${home}/Library/Logs/gh-upstream-watch.log</string>
+  <key>StandardErrorPath</key>
+  <string>${home}/Library/Logs/gh-upstream-watch.log</string>
+</dict>
+</plist>
