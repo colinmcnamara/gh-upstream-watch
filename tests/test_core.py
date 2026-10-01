@@ -1,5 +1,7 @@
 """What fires an alert: the diff, mentions, closes/xref parsing, gates, notifications, claim boards.
 Ported from the original single-file watcher's checks, with synthetic data."""
+import itertools
+
 import pytest
 from conftest import FIXTURES
 
@@ -114,8 +116,11 @@ def test_closes(body, src, hit):
     assert core.closes(body, src, "acme/widgets", 390) is hit
 
 
+IDS = itertools.count(1)
+
+
 def comment(login, body, assoc="NONE"):
-    return {"user": {"login": login}, "body": body, "author_association": assoc}
+    return {"id": next(IDS), "user": {"login": login}, "body": body, "author_association": assoc}
 
 
 def issue_fixture(fake, comments, xrefs=()):
@@ -136,7 +141,8 @@ def test_unauthorized_accept_is_ignored(fake):
     issue_fixture(fake, [comment("maint", "> /accept\nquoting the bot", "OWNER"), comment("maint", "LGTM\n/accept", "OWNER")])
     assert core.fingerprint("acme/widgets", 390, ME, rules)["gates"] == {}, "only the start of a comment counts"
     issue_fixture(fake, [comment("drive-by", "/accept"), comment("maint", "  /accept", "COLLABORATOR"), comment(ME, "/assign")])
-    assert core.fingerprint("acme/widgets", 390, ME, rules)["gates"] == {"accept": {"by": "maint", "done": True, "bot": False}}
+    gate = core.fingerprint("acme/widgets", 390, ME, rules)["gates"]["accept"]
+    assert {k: gate[k] for k in ("by", "done", "bot")} == {"by": "maint", "done": True, "bot": False}
     issue_fixture(fake, [comment(ME, "/accept", "OWNER")])
     assert core.fingerprint("acme/widgets", 390, ME, rules)["gates"] == {}, "your own /accept is not a gate"
 
@@ -217,6 +223,7 @@ def test_parse_claimable():
 
 
 PHISH = "| AVAILABLE | [#614 Phish](https://evil.example/x) |"
+LEAD = {"user": {"login": "lead"}, "author_association": "MEMBER"}
 
 
 def test_claimable_asks_repo_qualified_once(fake):
@@ -224,8 +231,8 @@ def test_claimable_asks_repo_qualified_once(fake):
     fake.responses = {
         f'search/issues?order=desc&page=1&per_page=100&q=repo:{repo} is:issue is:open in:title "Workgroup Issues"&sort=created':
             {"total_count": 1, "items": [{"number": 983, "title": "[Community] Workgroup Issues 2026-01-05",
-                                          "html_url": "https://github.com/acme/widgets/issues/983"}]},
-        f"repos/{repo}/issues/983/comments?page=1&per_page=100": [{"body": BOARD.replace("### Merged", PHISH + "\n### Merged")}]}
+                                          "html_url": "https://github.com/acme/widgets/issues/983", **LEAD}]},
+        f"repos/{repo}/issues/983/comments?page=1&per_page=100": [{"body": BOARD.replace("### Merged", PHISH + "\n### Merged"), **LEAD}]}
     seen = {}
     got = core.claimable_asks(seen, repo, SR, ["data-plane"], 1.7e9, set())
     assert [(a["title"], a["key"]) for a in got][0] == ("CLAIMABLE in wg/data-plane: /assign now", "acme/widgets#613")
@@ -260,3 +267,89 @@ def test_notifications_follow_watched_repos_exactly(fake):
     assert len(core.notification_asks({}, 30, 1.7e9, set(), ["acme/widgets"])) == 1
     assert len(core.notification_asks({}, 30, 1.7e9, set(), ["acme/*"])) == 2
     assert not core.repo_matches("acme/widgets-extra", ["acme/widgets"])
+
+
+# --- red-team round 2 (v0.1.1) -----------------------------------------------------------------
+
+ACME = packs.for_repo(packs.load([FIXTURES / "packs"]), "acme/widgets")
+
+
+def fp(**kw):
+    base = {"title": "Bug", "url": "https://github.com/acme/widgets/issues/390", "state": "open", "labels": [],
+            "assignees": [], "human_comments": 0, "mentions_me": 0, "xrefs": [], "gates": {},
+            "max_comment_id": 10, "human_ids": [], "mention_ids": []}
+    return dict(base, **kw)
+
+
+def test_an_edit_that_makes_a_known_reference_closing_alerts():
+    url = "https://github.com/acme/widgets/pull/401"
+    old, new = fp(xrefs=[[url, "pr", "mallory", False]]), fp(xrefs=[[url, "pr", "mallory", True]])
+    assert [k for k, _, _ in core.changes(old, new, ME, ACME)] == ["competing_pr"]
+    assert core.changes(new, new, ME, ACME) == [], "once"
+
+
+def test_a_deleted_comment_cannot_hide_a_new_one():
+    old = fp(human_comments=1, human_ids=[10], max_comment_id=10)
+    new = fp(human_comments=1, human_ids=[12], max_comment_id=12)  # #10 deleted, #12 is new
+    assert core.changes(old, new, ME, ACME) == [("comments", "1 new comment(s) from people", None)]
+
+
+def test_renaming_an_issue_to_a_quiet_title_does_not_silence_it():
+    old = fp(human_ids=[10], human_comments=1)
+    new = fp(title="[Community] Bug", human_ids=[10, 11], human_comments=2, max_comment_id=11)
+    assert ("comments", "1 new comment(s) from people", None) in core.changes(old, new, ME, ACME)
+
+
+def test_state_from_before_ids_still_diffs_by_count():
+    old = {k: v for k, v in fp(human_comments=1).items() if k not in ("max_comment_id", "human_ids", "mention_ids")}
+    assert core.changes(old, fp(human_comments=3, human_ids=[11, 12, 13]), ME, ACME) == [
+        ("comments", "2 new comment(s) from people", None)]
+
+
+def test_an_older_assign_does_not_answer_a_new_accept(fake):
+    issue_fixture(fake, [comment(ME, "/assign"), comment("maint", "/accept", "COLLABORATOR")])
+    assert core.fingerprint("acme/widgets", 390, ME, ACME)["gates"]["accept"]["done"] is False
+
+
+def test_deleted_accounts_do_not_crash_an_item(fake):
+    ghost = dict(comment("x", "/accept", "OWNER"), user=None)
+    issue_fixture(fake, [ghost, comment("maint", "hi", "OWNER")])
+    f = core.fingerprint("acme/widgets", 390, ME, ACME)
+    assert f["gates"]["accept"]["by"] == "ghost" and f["human_comments"] == 2
+
+
+def test_claim_board_trusts_only_authorized_authors(fake):
+    repo, q = "acme/widgets", 'q=repo:acme/widgets is:issue is:open in:title "Workgroup Issues"&sort=created'
+    fake_board = {"number": 999, "title": "[Community] Workgroup Issues (weekly, updated)",
+                  "html_url": "https://github.com/acme/widgets/issues/999", "user": {"login": "mallory"},
+                  "author_association": "NONE"}
+    real_board = {"number": 983, "title": "[Community] Workgroup Issues 2026-01-05",
+                  "html_url": "https://github.com/acme/widgets/issues/983", **LEAD}
+    other_repo = BOARD.replace("https://github.com/acme/widgets/issues/613", "https://github.com/mallory/phish/issues/1")
+    fake.responses = {
+        f"search/issues?order=desc&page=1&per_page=100&{q}": {"total_count": 2, "items": [fake_board, real_board]},
+        f"repos/{repo}/issues/983/comments?page=1&per_page=100": [
+            {"body": BOARD.replace("#613 Add mappings", "#700 Spoofed"), "user": {"login": "mallory"}, "author_association": "NONE"},
+            {"body": other_repo, **LEAD}]}
+    got = core.claimable_asks({}, repo, SR, ["data-plane"], 1.7e9, set())
+    assert [a["key"] for a in got] == ["acme/widgets#613"], "fake board and outsider rows are ignored"
+    assert got[0]["url"] == "https://github.com/acme/widgets/issues/983", "a row link outside the repo falls back"
+    assert not any(c[4].endswith("/999/comments") for c in fake.calls)
+
+
+def test_not_found_and_rate_limits(monkeypatch):
+    errors = iter(["gh: API rate limit exceeded (HTTP 403)", None])
+    slept = []
+
+    def run(argv):
+        e = next(errors)
+        if e:
+            raise github.GHError(e)
+        return "{}"
+
+    monkeypatch.setattr(github, "_run", run)
+    monkeypatch.setattr(github.time, "sleep", slept.append)
+    assert github.gh_get("x") == {} and slept == [github.RETRY_WAIT]
+    monkeypatch.setattr(github, "_run", lambda argv: (_ for _ in ()).throw(github.GHError("gh: Not Found (HTTP 404)")))
+    with pytest.raises(github.NotFound):
+        github.gh_get("x")

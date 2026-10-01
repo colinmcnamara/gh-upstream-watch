@@ -8,6 +8,7 @@ import string
 import sys
 import time
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 from . import __version__, core, github, hooks, notify, packs, slack, state
 
@@ -104,9 +105,26 @@ def load_config(a):
                      ("webhook", a.webhook), ("hook", a.hook), ("claim_groups", a.claim_group), ("login", a.login)):
         if val is not None:
             cfg[key] = val
-    cfg["packs_dirs"] = list(cfg["packs_dirs"]) + (a.packs_dir or [])
     if a.slack is not None:
         cfg["slack"] = dict(cfg["slack"], enabled=a.slack)
+    for key, default in DEFAULTS.items():
+        val = cfg[key]
+        if isinstance(default, list):
+            ok = isinstance(val, list) and all(isinstance(x, str) for x in val)
+        elif isinstance(default, int) and not isinstance(default, bool):
+            ok = isinstance(val, int) and not isinstance(val, bool) and val > 0
+        elif isinstance(default, dict):
+            ok = isinstance(val, dict)
+        elif key == "notification_repos":
+            ok = val is None or isinstance(val, list) and all(isinstance(x, str) for x in val)
+        else:
+            ok = val is None or isinstance(val, str)
+        if not ok:
+            raise ConfigError(f"config {key}: {val!r} is not a valid value (default {default!r})")
+    cfg["packs_dirs"] = cfg["packs_dirs"] + (a.packs_dir or [])
+    for r in cfg["repos"]:
+        if r.count("/") != 1 or not all(r.split("/")):
+            raise ConfigError(f"repo {r!r}: expected owner/repo")
     cfg["state"] = os.path.expanduser(cfg["state"] or default_state())
     for e in cfg["extras"]:
         repo, _, n = e.partition("#")
@@ -160,13 +178,19 @@ def run(cfg, a, now=None):
             log(f"re-delivering {len(st['outbox'])} alert(s) from an earlier run")
             st["outbox"] = flush(st["outbox"])
             state.save(path, st)
-        complete, alerts, unknowns = True, [], []
+        complete, alerts, unknowns, failed = True, [], [], set()
 
-        def unknown(what, e):
+        def unknown(what, e, source=None):
             nonlocal complete
             complete = False
+            failed.add(source or what)
             unknowns.append(f"{what}: {e}"[:300])
             log(f"{what}: unknown this run, nothing marked seen: {e}")
+
+        def source_of(key):
+            """Alerts are held back per source until that source has had one complete run, so one
+            check that keeps failing (a typo'd extra, a token without notifications) never blocks the rest."""
+            return f"extra:{key}" if key in cfg["extras"] else f"repo:{key.partition('#')[0]}"
 
         try:
             me = cfg.get("login") or github.gh_get("user")["login"]
@@ -183,19 +207,35 @@ def run(cfg, a, now=None):
             try:
                 found |= core.discover(repo, me, cfg["recent_closed_days"], now)
             except Exception as e:
-                unknown(f"search {repo}", e)  # nothing is dropped: baselines below keep every old item
-        watch = found | set(cfg["extras"]) | {k for k, v in old.items() if v.get("state") == "open"}
-        items = {}
+                unknown(f"search {repo}", e, f"repo:{repo}")  # nothing is dropped: baselines below keep every old item
+        # New items whose first fetch failed are retried until they get a baseline (or baseline_days pass).
+        retry = {k: t for k, t in st.get("retry", {}).items() if now - t < cfg["baseline_days"] * 86400}
+        watch = found | set(cfg["extras"]) | set(retry) | {k for k, v in old.items() if v.get("state") == "open"}
+        items, gone = {}, set()
         for key in sorted(watch):
             repo, _, n = key.partition("#")
             rules = packs.for_repo(rule_packs, repo)
             try:
                 fp = core.fingerprint(repo, int(n), me, rules, cfg["bots"])
+            except github.NotFound as e:
+                # Deleted, transferred, or no longer visible: say so once, then stop watching it.
+                gone.add(key)
+                retry.pop(key, None)
+                if key in old:
+                    alerts.append(("live", alert(now, "gone", key, f"{key} {old[key].get('title', '')[:50]}",
+                                                         "GONE: deleted, moved, or no longer visible to you",
+                                                         old[key].get("url"))))
+                else:
+                    log(f"{key}: not found ({e}); check --extra, or it was deleted")
+                continue
             except Exception as e:
-                unknown(key, e)
+                unknown(key, e, source_of(key))
                 if key in old:
                     items[key] = old[key]
+                else:
+                    retry.setdefault(key, now)
                 continue
+            retry.pop(key, None)
             found_alerts = core.changes(old.get(key), fp, me, rules)
             if cfg["hook"] and key in old:
                 extra = hooks.run(cfg["hook"], {"key": key, "repo": repo, "number": int(n), "me": me, "old": old[key], "new": fp})
@@ -207,11 +247,13 @@ def run(cfg, a, now=None):
             fp["_seen"] = now
             items[key] = fp
             for kind, msg, url in found_alerts:
-                alerts.append(alert(now, kind, key, f"{key} {fp['title'][:50]}", msg, url or fp["url"]))
+                # Only first-sight alerts wait for seeding; a change against a saved baseline is always real.
+                src = "live" if key in old else source_of(key)
+                alerts.append((src, alert(now, kind, key, f"{key} {fp['title'][:50]}", msg, url or fp["url"])))
         # Baselines of items no longer searched (closed longer than recent_closed_days) are kept for
         # baseline_days, so a later reopen is compared with them and alerts instead of seeding quietly.
         for key, fp in old.items():
-            if key not in items and now - fp.get("_seen", now) < cfg["baseline_days"] * 86400:
+            if key not in items and key not in gone and now - fp.get("_seen", now) < cfg["baseline_days"] * 86400:
                 items[key] = fp
 
         note_repos = cfg["notification_repos"]
@@ -219,7 +261,8 @@ def run(cfg, a, now=None):
             note_repos = cfg["repos"] + [e.partition("#")[0] for e in cfg["extras"]]
         seen, live = dict(st["notifications"]["seen"]), set()
         try:
-            alerts += [alert(now, **x) for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos)]
+            alerts += [("notifications", alert(now, **x))
+                       for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos)]
             st["notifications"]["seen"] = seen
         except Exception as e:
             unknown("notifications", e)
@@ -230,15 +273,16 @@ def run(cfg, a, now=None):
                 continue
             seen = dict(st["claimable"]["seen"])
             try:
-                alerts += [alert(now, **x) for x in core.claimable_asks(seen, repo, rules, cfg["claim_groups"], now, live)]
+                alerts += [(f"claim:{repo}", alert(now, **x))
+                           for x in core.claimable_asks(seen, repo, rules, cfg["claim_groups"], now, live)]
                 st["claimable"]["seen"] = seen
             except Exception as e:
-                unknown(f"claim board {repo}", e)
+                unknown(f"claim board {repo}", e, f"claim:{repo}")
 
         if cfg["slack"].get("enabled"):
             sst = json.loads(json.dumps(st["slack"]))
             try:
-                alerts += [alert(now, **x) for x in slack.check(cfg["slack"], sst, now)]
+                alerts += [("slack", alert(now, **x)) for x in slack.check(cfg["slack"], sst, now)]
                 st["slack"] = dict(sst, failures=0, last_error=None)
             except Exception as e:  # SlackError or a bug: either way GitHub alerts still go out
                 # Slack has its own failure state; it never makes the GitHub pass incomplete.
@@ -246,13 +290,31 @@ def run(cfg, a, now=None):
                 st["slack"]["last_error"] = str(e)[:300]
                 log(f"slack: unknown this run (failure {st['slack']['failures']}): {e}")
 
-        st["items"], st["last_unknown"] = items, unknowns
-        if not st["seeded"]:
-            log(f"seed run: watching {len(items)} item(s); {len(alerts)} alert(s) suppressed. "
-                "Alerts start after the first complete run.")
-            alerts = []
+        st["items"], st["last_unknown"], st["retry"] = items, unknowns, retry
+        # Slack seeds itself and "live" alerts diff a saved baseline; every other source seeds on its
+        # first complete run.
+        sources = ({f"repo:{r}" for r in cfg["repos"]} | {f"extra:{e}" for e in cfg["extras"]} | {"notifications"}
+                   | {f"claim:{r}" for r in cfg["repos"] if packs.for_repo(rule_packs, r)["claimable"] and cfg["claim_groups"]})
+        # State from 0.1.0 has only the global flag: everything it watched then counts as seeded, and a
+        # repo added later still seeds quietly instead of alerting on its old /accepts.
+        if "seeded_sources" not in st:
+            had = {k.partition("#")[0] for k in old} | {k.partition("#")[0] for k in st["claimable"]["seen"]}
+            st["seeded_sources"] = sorted(
+                {s for s in sources if s == "notifications" or s.partition(":")[2].partition("#")[0] in had}
+                - {f"extra:{e}" for e in cfg["extras"] if e not in old}) if st["seeded"] else []
+        seeded = set(st["seeded_sources"])
+        ok = lambda src: src in ("slack", "live") or src in seeded  # noqa: E731
+        held = [al for src, al in alerts if not ok(src)]
+        alerts = [al for src, al in alerts if ok(src)]
+        newly = (sources - failed) - seeded
+        seeded |= newly
+        st["seeded_sources"], st["seeded"] = sorted(seeded), sources <= seeded
+        if newly:
+            log(f"seed run: watching {len(items)} item(s); {len(held)} alert(s) suppressed. "
+                + ("All sources seeded; alerts start next run." if st["seeded"] else
+                   f"Still seeding: {', '.join(sorted(sources - seeded))} (see `status`)."))
         if complete:
-            st["seeded"], st["last_complete"] = True, now
+            st["last_complete"] = now
             state.prune(st, now, cfg["retention_days"], live)
         if a.dry_run:
             for al in alerts:
@@ -291,6 +353,10 @@ def status(cfg):
     last = st.get("last_complete")
     print(f"state: {path}")
     print(f"seeded {st['seeded']}, last complete run {time.strftime('%Y-%m-%d %H:%M', time.localtime(last)) if last else 'never'}")
+    if not st["seeded"]:
+        print(f"seeded so far: {', '.join(st.get('seeded_sources') or []) or 'nothing'} (the rest seed on their first complete run)")
+    if st.get("retry"):
+        print(f"waiting for a first baseline: {', '.join(sorted(st['retry']))}")
     open_items = sum(1 for v in st["items"].values() if v.get("state") == "open")
     print(f"items: {len(st['items'])} ({open_items} open); notifications seen: {len(st['notifications']['seen'])}; "
           f"claim rows seen: {len(st['claimable']['seen'])}; outbox: {len(st['outbox'])}")
@@ -358,9 +424,10 @@ def printers(a):
     prog.append("--once")
     fields = {"program": " ".join(prog), "interval_seconds": a.interval * 60, "interval_minutes": a.interval,
               "path": minimal_path(), "home": str(Path.home()),
-              "program_args": "\n".join(f"    <string>{p}</string>" for p in prog)}
+              "program_args": "\n".join(f"    <string>{xml_escape(p)}</string>" for p in prog)}
     if a.print_plist:
-        print(template("launchd.plist.template").substitute(fields), end="")
+        esc = {k: xml_escape(str(v)) for k, v in fields.items() if k != "program_args"}
+        print(template("launchd.plist.template").substitute(fields, **esc), end="")
     if a.print_systemd:
         print("# ~/.config/systemd/user/gh-upstream-watch.service")
         print(template("systemd/gh-upstream-watch.service").substitute(fields))
@@ -374,6 +441,9 @@ def printers(a):
 def main(argv=None):
     a = build_parser().parse_args(argv)
     if a.print_plist or a.print_systemd or a.print_cron:
+        if not (1 <= a.interval < 60 and 60 % a.interval == 0 if a.print_cron else 1 <= a.interval <= 1440):
+            log("error: --interval must divide 60 for cron (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30), 1-1440 otherwise")
+            return 2
         return printers(a)
     try:
         if a.command == "init":

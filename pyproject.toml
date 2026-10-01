@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "gh-upstream-watch"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read-only alerts for your upstream work: tells you the next action when a maintainer gate, a competing PR, or a review moves."
 readme = "README.md"
 license = "MIT"

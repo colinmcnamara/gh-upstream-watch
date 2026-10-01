@@ -29,17 +29,30 @@ def load(path):
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("not an object")
+        if "schema" not in data:
+            print(f"state: {path} is v0; migrating in memory", file=sys.stderr)
+            return migrate_v0(data, time.time())
+        if not isinstance(data["schema"], int):
+            raise ValueError("schema is not a number")
+        if data["schema"] > SCHEMA:
+            raise SystemExit(f"state: {path} has schema {data['schema']}; this version reads {SCHEMA}. Upgrade.")
+        st = {**empty(), **data}
+        # Valid JSON in the wrong shape (a hand edit, a bad restore) would crash every run: quarantine it too.
+        for k, v in empty().items():
+            if v is not None and not isinstance(v, bool) and not isinstance(st[k], type(v)):
+                raise ValueError(f"{k} is {type(st[k]).__name__}, not {type(v).__name__}")
+        if not all(isinstance(st[k].get("seen", {}), dict) for k in ("notifications", "claimable")):
+            raise ValueError("seen is not an object")
+        if not all(isinstance(v, dict) for v in st["items"].values()) or not all(
+                isinstance(e, dict) and isinstance(e.get("alert"), dict) and isinstance(e.get("pending"), list)
+                for e in st["outbox"]):
+            raise ValueError("an item or outbox entry is not an object")
+        return st
     except ValueError as e:
         aside = f"{path}.corrupt-{int(time.time())}"
         os.replace(path, aside)
         print(f"state: {path} is unreadable ({e}); moved to {aside}, re-seeding quietly", file=sys.stderr)
         return empty()
-    if "schema" not in data:
-        print(f"state: {path} is v0; migrating in memory", file=sys.stderr)
-        return migrate_v0(data, time.time())
-    if data["schema"] > SCHEMA:
-        raise SystemExit(f"state: {path} has schema {data['schema']}; this version reads {SCHEMA}. Upgrade.")
-    return {**empty(), **data}
 
 
 def save(path, data):

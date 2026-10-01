@@ -88,3 +88,51 @@ def test_a_slack_bug_never_blocks_github(fake, tmp_path, monkeypatch):
     assert cli.main(args) == 0
     st = json.loads((tmp_path / "s.json").read_text())
     assert st["seeded"] and st["slack"]["failures"] == 1
+
+
+def test_bidi_and_markup_never_reach_a_notifier():
+    spoof = dict(ALERT, title="acme‮devorppa", message='<a href="https://evil">Approved</a> &')
+    assert "‮" not in notify.text(spoof)
+    body = notify.desktop_argv("notify-send", spoof)[-1]
+    assert "<a" not in body and "&lt;a" in body and "&amp;" in body
+    assert "‮" not in " ".join(notify.desktop_argv("osascript", spoof))
+
+
+def test_python_dash_m_and_an_escaped_plist(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "src"
+    r = subprocess.run([sys.executable, "-m", "gh_upstream_watch", "--version"], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONPATH": str(src)})
+    assert r.returncode == 0 and "gh-upstream-watch" in r.stdout
+    cfg = tmp_path / "a&b.json"
+    r = subprocess.run([sys.executable, "-m", "gh_upstream_watch", "--print-plist", "--config", str(cfg)],
+                       capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(src)})
+    assert "a&amp;b.json" in r.stdout and "a&b.json" not in r.stdout
+
+
+def test_quiet_issue_edit_that_adds_a_mention_counts():
+    from gh_upstream_watch import core
+    rules = packs.for_repo(packs.load([FIXTURES / "packs"]), "acme/widgets")
+    base = {"title": "[Community] sync", "url": "https://github.com/acme/widgets/issues/1", "state": "open",
+            "labels": [], "assignees": [], "xrefs": [], "gates": {}, "human_comments": 2, "human_ids": [3, 5]}
+    old = dict(base, max_comment_id=5, mention_ids=[5], mentions_me=1)
+    new = dict(base, max_comment_id=5, mention_ids=[3, 5], mentions_me=2)  # comment 3 edited to name you
+    assert core.changes(old, new, "octocat", rules) == [("mentions", "1 comment(s) naming you", None)]
+
+
+@pytest.mark.parametrize("heading,found", [("## [0.1.1] - 2026-09-30", True), ("## [0.1.1]", True),
+                                           ("## [0.1.10] - 2026-10-01", False), ("## [0x1y1] - x", False)])
+def test_release_changelog_check_matches_the_exact_version(tmp_path, heading, found):
+    """Runs the awk line from release.yml itself."""
+    import re
+    import subprocess
+    from pathlib import Path
+    wf = (Path(__file__).resolve().parents[1] / ".github/workflows/release.yml").read_text()
+    line = next(x.strip() for x in wf.splitlines() if x.strip().startswith("awk -v h="))
+    (tmp_path / "CHANGELOG.md").write_text(f"# Changelog\n\n{heading}\n\n- a note\n\n## [0.1.0] - old\n\n- old\n")
+    r = subprocess.run(["bash", "-c", line], cwd=tmp_path, env={**os.environ, "v": "0.1.1", "RUNNER_TEMP": str(tmp_path)})
+    assert r.returncode == 0
+    assert ("- a note" in (tmp_path / "notes.md").read_text()) is found
+    assert re.search(r"\$v", line), "the version comes from the workflow's own variable"
