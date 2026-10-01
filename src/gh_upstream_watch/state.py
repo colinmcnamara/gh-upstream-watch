@@ -88,6 +88,31 @@ def lock(path):
         os.close(fd)
 
 
+ALWAYS = ("slack", "live")  # Slack seeds itself; "live" alerts diff a saved baseline
+
+
+def hold_until_seeded(st, alerts, sources, failed, old_items, extras):
+    """Split (source, alert) pairs into (send, held) and record which sources are now seeded.
+
+    A source (repo:R, extra:R#N, claim:R, notifications) seeds on its first run without a failure;
+    until then its alerts are held, so a first sight never floods. One source that keeps failing
+    holds back only its own alerts. Returns (send, held, newly_seeded)."""
+    if "seeded_sources" not in st:
+        # 0.1.0 state has only the global flag: what it already watched counts as seeded, and a
+        # repo added later still seeds quietly instead of alerting on its old /accepts.
+        had = {k.partition("#")[0] for k in old_items} | {k.partition("#")[0] for k in st["claimable"]["seen"]}
+        st["seeded_sources"] = sorted(
+            {s for s in sources if s == "notifications" or s.partition(":")[2].partition("#")[0] in had}
+            - {f"extra:{e}" for e in extras if e not in old_items}) if st["seeded"] else []
+    seeded = set(st["seeded_sources"])
+    send = [al for src, al in alerts if src in ALWAYS or src in seeded]
+    held = [al for src, al in alerts if not (src in ALWAYS or src in seeded)]
+    newly = (set(sources) - set(failed)) - seeded
+    seeded |= newly
+    st["seeded_sources"], st["seeded"] = sorted(seeded), set(sources) <= seeded
+    return send, held, newly
+
+
 def _epoch(iso):
     try:
         return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))

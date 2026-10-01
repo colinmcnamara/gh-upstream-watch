@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.3] - 2026-10-01
+
+Structure: easier to change safely.
+
+- Seeding is one function, `state.hold_until_seeded`, with its own unit tests (the logic that
+  needed two fixes in 0.1.1).
+- `check-pack FILE...` validates rule packs and prints what each gate and claim board trusts,
+  which titles are quiet, and whether a pack replaces a bundled one.
+- Scheduler entries (`--print-*`, `init --schedule`) live in `schedule.py`.
+- One `hint()` gives the next step for every error, in `status`, escalation alerts and login failures.
+- A test keeps the README honest: every command in it must parse and every config key must exist.
+  It found the `state` key missing from the README's example config.
+- CONTRIBUTING documents the state file and the `claimable.authorized_by` pack key.
+
 ## [0.1.2] - 2026-09-30
 
 First-run and unattended-use improvements.

@@ -146,6 +146,7 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
 {
   "repos": ["acme/widgets", "acme/gadgets"],
   "extras": ["octo-org/octo-repo#12"],
+  "state": null,
   "notify": "auto",
   "webhook": null,
   "hook": null,
@@ -161,6 +162,9 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
   "slack": {"enabled": false}
 }
 ```
+
+`state: null` keeps the state file at `$XDG_STATE_HOME/gh-upstream-watch/state.json`
+(default `~/.local/state/...`); it is written mode 0600.
 
 Notifications: stdout always (text with the URL, or `--json` for JSON lines). `notify: auto` uses
 `$GH_UPSTREAM_WATCH_NOTIFY` (a command that gets the alert JSON on stdin) if set, else

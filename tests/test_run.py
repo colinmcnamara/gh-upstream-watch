@@ -9,7 +9,7 @@ import sys
 import pytest
 from conftest import FIXTURES, ROOT
 
-from gh_upstream_watch import cli, notify
+from gh_upstream_watch import cli, notify, schedule
 
 GOLDEN = (FIXTURES / "demo" / "run2.golden").read_text().splitlines()
 
@@ -378,13 +378,13 @@ def test_explain_shows_what_a_run_would_alert(watch, fake, capsys):
 def test_init_schedule_installs_the_scheduler(tmp_path, monkeypatch, capsys, platform):
     calls = []
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setattr(cli.sys, "platform", platform)
-    monkeypatch.setattr(cli.shutil, "which", lambda t: "/bin/systemctl" if platform == "linux" and t == "systemctl" else None)
-    monkeypatch.setattr(cli, "install_schedule", lambda a, run=None, _real=cli.install_schedule: _real(a, run=lambda argv, **k: calls.append(argv)))
+    monkeypatch.setattr(schedule.sys, "platform", platform)
+    monkeypatch.setattr(schedule.shutil, "which", lambda t: "/bin/systemctl" if platform == "linux" and t == "systemctl" else None)
+    monkeypatch.setattr(schedule, "install", lambda a, run=None, _real=schedule.install: _real(a, run=lambda argv, **k: calls.append(argv)))
     assert cli.main(["init", "--repos", "acme/widgets", "--login", "octocat", "--schedule"]) == 0
     out = capsys.readouterr().out
     if platform == "darwin":
-        plist = tmp_path / cli.PLIST
+        plist = tmp_path / schedule.PLIST
         assert plist.exists() and "<string>--once</string>" in plist.read_text()
         assert calls[-1][:2] == ["launchctl", "bootstrap"] and calls[-1][3] == str(plist)
     elif platform == "linux":

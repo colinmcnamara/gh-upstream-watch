@@ -75,3 +75,53 @@ def test_v0_file_at_the_state_path_is_migrated_on_load(tmp_path):
     p = tmp_path / "state.json"
     p.write_text((FIXTURES / "state_v0.json").read_text())
     assert state.load(str(p))["schema"] == 1
+
+
+# --- seeding ---------------------------------------------------------------------------------------
+
+A = {"title": "a"}
+
+
+def seeding(st, alerts, sources, failed=(), old=(), extras=()):
+    return state.hold_until_seeded(st, alerts, set(sources), set(failed), dict.fromkeys(old, {}), list(extras))
+
+
+def test_a_new_state_holds_first_sight_and_seeds_what_completed():
+    st = state.empty()
+    send, held, newly = seeding(st, [("repo:a/b", A), ("notifications", A), ("live", A)],
+                                ["repo:a/b", "notifications"], failed=["notifications"])
+    assert send == [A] and len(held) == 2 and newly == {"repo:a/b"}
+    assert st["seeded_sources"] == ["repo:a/b"] and st["seeded"] is False
+
+
+def test_a_failing_source_holds_back_only_itself():
+    st = dict(state.empty(), seeded_sources=["repo:a/b"])
+    send, held, _ = seeding(st, [("repo:a/b", A), ("notifications", A)], ["repo:a/b", "notifications"],
+                            failed=["notifications"])
+    assert len(send) == 1 and len(held) == 1 and st["seeded"] is False
+    seeding(st, [], ["repo:a/b", "notifications"])
+    assert st["seeded"] is True, "seeded once every source has completed"
+
+
+def test_slack_and_live_alerts_are_never_held():
+    send, held, _ = seeding(state.empty(), [("slack", A), ("live", A)], ["repo:a/b"], failed=["repo:a/b"])
+    assert len(send) == 2 and held == []
+
+
+def test_upgraded_state_seeds_what_it_watched_but_not_a_new_repo():
+    st = dict(state.empty(), seeded=True)  # 0.1.0: no seeded_sources
+    send, held, newly = seeding(st, [("repo:a/new", A), ("repo:a/b", A)], ["repo:a/b", "repo:a/new", "notifications"],
+                                old=["a/b#1"])
+    assert send == [A] and held == [A] and newly == {"repo:a/new"}
+
+
+def test_an_extra_new_since_the_upgrade_still_seeds():
+    st = dict(state.empty(), seeded=True)
+    _, held, _ = seeding(st, [("extra:a/b#9", A)], ["repo:a/b", "extra:a/b#9"], old=["a/b#1"], extras=["a/b#9"])
+    assert held == [A]
+
+
+def test_removing_a_source_cannot_leave_the_flag_stuck():
+    st = dict(state.empty(), seeded_sources=["repo:a/b"])
+    seeding(st, [], ["repo:a/b"])
+    assert st["seeded"] is True

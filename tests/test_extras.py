@@ -1,6 +1,7 @@
 """Notifiers, --hook, the opt-in Slack source, pack validation, and config precedence."""
 import json
 import sys
+from pathlib import Path
 
 import pytest
 from conftest import FIXTURES
@@ -291,3 +292,36 @@ def test_version_is_single_valued():
     from conftest import ROOT
     from gh_upstream_watch import __version__
     assert re.search(r'^version = "(.*)"', (ROOT / "pyproject.toml").read_text(), re.M).group(1) == __version__
+
+
+def test_check_pack_validates_and_describes(tmp_path, capsys):
+    bundled = Path(packs.__file__).parent / "packs" / "vllm-semantic-router.json"
+    assert cli.main(["check-pack", str(bundled)]) == 0
+    out = capsys.readouterr().out
+    assert "gate accept: comment `^/accept\\b`, trusts associations ['OWNER', 'COLLABORATOR']" in out
+    assert "claim board" in out and "'MEMBER'" in out
+    mine = tmp_path / "vllm-semantic-router.json"
+    mine.write_text(bundled.read_text())
+    assert cli.main(["check-pack", str(mine)]) == 0
+    assert "(replaces the bundled pack)" in capsys.readouterr().out
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"id": "x", "repos": ["a/*"], "gates": [{"id": "g", "comment": "/accept", "authorized_by": {}, "alert": "a"}]}')
+    assert cli.main(["check-pack", str(bad)]) == 2
+    assert "anchored" in capsys.readouterr().err
+    assert cli.main(["check-pack", str(tmp_path / "missing.json")]) == 2
+    assert cli.main(["check-pack"]) == 2
+
+
+@pytest.mark.parametrize("err,fix", [
+    ("user: gh exited 1: HTTP 401", "gh auth login"),
+    ("user: gh exited 1: gh: Bad credentials (HTTP 401)", "gh auth login"),
+    ("user: gh exited 4: To get started with GitHub CLI, please run:  gh auth login", "gh auth login"),
+    ("user: [Errno 2] No such file or directory: 'gh'", "https://cli.github.com"),
+    ("notifications: gh exited 1: gh: Not Found (HTTP 404)", "gh auth refresh -s notifications"),
+    ("repos/a/b/issues/1: gh exited 1: gh: Not Found (HTTP 404)", "`forget` drops it"),
+    ("search/issues: gh exited 1: API rate limit exceeded (HTTP 403)", "rate limited"),
+    ("search 'repo:a/b': 1200 results exceed the 1000 cap", "narrow repos"),
+    ("something else entirely", ""),
+])
+def test_hint_gives_the_next_step(err, fix):
+    assert fix in cli.hint(err) if fix else cli.hint(err) == ""

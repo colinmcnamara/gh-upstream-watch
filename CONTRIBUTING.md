@@ -32,11 +32,35 @@ No real people, handles, Slack ids or local paths; the personal-data gate fails 
    | `label_transitions` | `{id, alert, has?, lacks?, assigned_to_me?}`: alerts when the condition becomes true |
    | `quiet_titles` | regexes; matching items alert on comments only when they `@`-name you |
    | `messages` | wording for `assigned`, `reopened`, `competing_pr`, `reference` (`{number}`, `{author}`, `{kind}`, `{target}`) |
-   | `claimable` | `{search, title, comment_marker, section, row, alert}`: a claim-board issue; `row` needs named groups `number`, `title`, `url`; `{group}` in `comment_marker` and `alert` |
+   | `claimable` | `{search, title, comment_marker, section, row, alert, authorized_by?}`: a claim-board issue; `row` needs named groups `number`, `title`, `url`; `{group}` in `comment_marker` and `alert`; only a board and rows by authors `authorized_by` trusts are read (default OWNER, COLLABORATOR) |
+
+   Check it with `gh-upstream-watch check-pack path/to/pack.json`: it validates the file and prints
+   what each gate trusts, which titles are quiet, and whether it replaces a bundled pack.
 
 2. Add a test with a synthetic fixture that shows the alert firing, and one that shows an
    unauthorized or unrelated comment staying silent. `tests/test_core.py` has examples.
 3. Anything packs cannot express belongs in a `--hook` script, not in the engine.
+
+## The state file
+
+One JSON object (`schema` 1), written atomically under an exclusive lock, mode 0600. New keys are
+additive; `state.load` quarantines a file whose known keys have the wrong type.
+
+| key | holds |
+| --- | --- |
+| `items` | `owner/repo#n` -> fingerprint (`core.fingerprint`): title, state, labels, assignees, comment ids (`max_comment_id`, `human_ids`, `mention_ids`), gates, cross-references, reviews, `_seen` |
+| `seeded_sources` | sources that have had one complete run: `repo:owner/repo`, `extra:owner/repo#n`, `claim:owner/repo`, `notifications` |
+| `seeded` | true once every configured source is in `seeded_sources` |
+| `retry` | new items whose first fetch failed -> first failure time; retried until they get a baseline |
+| `unknown_streak` | source -> `{since, runs}` while it keeps failing; drives the escalation alert |
+| `notifications.seen`, `claimable.seen` | ids already alerted, pruned after `retention_days` once GitHub stops returning them |
+| `slack` | the optional Slack source's own seen ids and failure count |
+| `outbox` | alerts not yet delivered to every destination: `{alert, pending, attempts}` |
+| `last_complete`, `last_unknown` | when every check last succeeded, and what the last run could not check |
+
+Alerts carry a source while a run is in progress. `state.hold_until_seeded` holds an alert until its
+source is seeded, except `live` (a change against a saved baseline) and `slack` (which seeds
+itself). A change to seeding belongs there, with a unit test in `tests/test_state.py`.
 
 ## Out of scope
 
