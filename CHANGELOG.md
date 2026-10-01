@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.2] - 2026-09-30
+
+First-run and unattended-use improvements.
+
+- `--dry-run` on a new install prints what the seed run holds back, marked
+  `(preview, not sent while seeding)`.
+- A source that stays unknown for `escalate_after_runs` runs in a row (default 6) sends one real
+  alert with the fix when there is a known one, including when `gh` is signed out. It repeats only
+  after the source recovers and fails again.
+- `status` prints the fix for each unknown and how long each source has been failing.
+- `init --schedule` installs and loads the scheduler: launchd on macOS, a systemd user timer where
+  `systemctl` exists, otherwise it prints the cron line.
+- `explain OWNER/REPO#N`: the packs, the live fingerprint, the saved one, and what a run would alert.
+- `forget OWNER/REPO#N...`: drop items from the state.
+- README opens with what the alerts look like.
+- CI and release: checkout v7, setup-uv v10, gitleaks-action v3 (Node 24, SHA-pinned); Dependabot
+  keeps the pins current; the release installs and runs the TestPyPI build before PyPI gets it.
+
 ## [0.1.1] - 2026-09-30
 
 Fixes from a red-team review (Codex and Claude, with reproductions).

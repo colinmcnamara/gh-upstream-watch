@@ -16,7 +16,7 @@ class Locked(Exception):
 
 def empty():
     return {"schema": SCHEMA, "seeded": False, "items": {}, "notifications": {"seen": {}},
-            "claimable": {"seen": {}}, "slack": {}, "outbox": [], "last_complete": None}
+            "claimable": {"seen": {}}, "slack": {}, "outbox": [], "last_complete": None, "unknown_streak": {}}
 
 
 def load(path):

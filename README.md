@@ -3,6 +3,15 @@
 Read-only alerts for your upstream work: tells you the next action when a maintainer gate, a
 competing PR, or a review moves.
 
+```text
+acme/widgets#390 Widget spins forever: ACCEPTED by @maint: comment /assign now
+acme/widgets#390 Widget spins forever: COMPETING PR #401 (by @monalisa) says Closes #390: check scope before /assign
+acme/widgets#388 Document the retry flag: REOPENED: claim it
+```
+
+`uv tool install gh-upstream-watch && gh-upstream-watch init --repos OWNER/REPO --schedule` and it
+runs every 30 minutes from then on.
+
 If you contribute to projects you do not maintain, the important events are easy to miss in the
 notification stream: a maintainer accepts your proposal and now expects you to claim it, someone
 else opens a PR that closes the issue you are working on, your closed issue is reopened. This tool
@@ -74,10 +83,18 @@ the default branch. `python -m gh_upstream_watch` works too.
 gh-upstream-watch init --repos acme/widgets       # writes ~/.config/gh-upstream-watch/config.json
 gh-upstream-watch --dry-run                       # one pass, print only, save nothing
 gh-upstream-watch                                 # one pass: alerts, then save state
-gh-upstream-watch status                          # what the state file knows
+gh-upstream-watch status                          # what the state file knows, and how to fix what failed
+gh-upstream-watch explain acme/widgets#390        # what the tool sees for one item, and what it would alert
+gh-upstream-watch forget acme/widgets#390         # stop watching an item (it seeds again if search finds it)
 ```
 
-Each invocation is one pass. Schedule it; the tool prints a ready scheduler entry that points at
+On a new install, `--dry-run` also prints what the seed run would hold back, marked
+`(preview, not sent while seeding)`, so you can see what you will get before anything is saved.
+
+`init --schedule` (with `--repos`, or on its own once a config exists) installs and loads the
+scheduler for you: a launchd agent on macOS, a systemd user timer where `systemctl` exists, and
+otherwise it prints the cron line to add. To do it by hand instead, the tool prints a ready
+scheduler entry that points at
 the interpreter and script you ran it with:
 
 ```sh
@@ -108,6 +125,11 @@ What one pass checks:
 - an item that is deleted or no longer visible to you (404 or 410) alerts once as `GONE` and is
   dropped from the watch list; it does not keep the run incomplete.
 
+If a source stays unknown for `escalate_after_runs` runs in a row (6, about three hours at the
+default interval), one real alert goes out through your notifiers, with the fix when there is a known
+one (for example `gh auth refresh -s notifications`), since a scheduled job's stderr is easy to
+miss. It does not repeat until that source has recovered and failed again.
+
 Exit status: 0 when every check completed, 1 when something was unknown this run (logged as
 `unknown this run`; `gh` missing or signed out also lands here, with the fix printed), 2 for a
 config, argument or rule-pack error (including no repos configured), 3 when another run holds the
@@ -135,6 +157,7 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
   "notification_repos": null,
   "login": "octocat",
   "bots": [],
+  "escalate_after_runs": 6,
   "slack": {"enabled": false}
 }
 ```
