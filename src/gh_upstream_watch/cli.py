@@ -4,14 +4,11 @@ import argparse
 import json
 import os
 import shutil
-import string
-import subprocess
 import sys
 import time
 from pathlib import Path
-from xml.sax.saxutils import escape as xml_escape
 
-from . import __version__, core, github, hooks, notify, packs, slack, state
+from . import __version__, core, github, hooks, notify, packs, schedule, slack, state
 
 DEFAULTS = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
             "packs_dirs": [], "claim_groups": [], "recent_closed_days": 14, "retention_days": 30,
@@ -36,11 +33,12 @@ def build_parser():
         prog="gh-upstream-watch",
         description="Read-only alerts for your upstream work: tells you the next action when a maintainer "
                     "gate, a competing PR, or a review moves. Every GitHub call is a GET.")
-    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "init", "migrate", "forget", "explain"],
+    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "init", "migrate", "forget", "explain", "check-pack"],
                     help="run (default): one pass; status: summarize the state file; init: write a starter "
                          "config; migrate: convert a v0 state file (--from) into --state; forget KEY...: drop "
-                         "items from the state; explain KEY: show what the tool sees for one item and why")
-    ap.add_argument("keys", nargs="*", metavar="OWNER/REPO#N", help="forget/explain: the items")
+                         "items from the state; explain KEY: show what the tool sees for one item and why; check-pack FILE...: "
+                         "validate rule packs and say what they do")
+    ap.add_argument("keys", nargs="*", metavar="OWNER/REPO#N", help="forget/explain: the items; check-pack: the files")
     ap.add_argument("--version", action="version", version=f"gh-upstream-watch {__version__}")
     ap.add_argument("--config", help="JSON config file (default: $XDG_CONFIG_HOME/gh-upstream-watch/config.json)")
     ap.add_argument("--state", help="state file (default: $XDG_STATE_HOME/gh-upstream-watch/state.json)")
@@ -79,8 +77,12 @@ MAX_ATTEMPTS = 5  # a destination that keeps failing is dropped after this many 
 
 
 def hint(err):
-    """The next step for an error a source keeps hitting, or '' when there is no better advice."""
+    """The next step for an error, or '' when there is no better advice than the error itself."""
     s = str(err)
+    if "No such file" in s or ("not found" in s.lower() and "exited" not in s and "HTTP" not in s):
+        return "gh (the GitHub CLI) was not found: install it from https://cli.github.com, then run `gh auth login`"
+    if "auth login" in s or "HTTP 401" in s or "exited 4" in s:
+        return "gh is not signed in: run `gh auth login` (and `gh auth refresh -s notifications` for notification alerts)"
     if "notifications" in s and ("403" in s or "404" in s):
         return "the token cannot read notifications: run `gh auth refresh -s notifications`"
     if "(HTTP 404)" in s or "not found" in s.lower():
@@ -89,19 +91,7 @@ def hint(err):
         return "rate limited: watch fewer repos, or schedule runs further apart"
     if "exceed" in s and "cap" in s:
         return "more than 1,000 search results: narrow repos"
-    if "auth login" in s or "(HTTP 401)" in s or "exited 4" in s:
-        return "gh is not signed in: run `gh auth login`"
     return ""
-
-
-def gh_hint(err):
-    """Turn a failed `gh api user` into the next step for a first-time user."""
-    s = str(err)
-    if "No such file" in s or "not found" in s.lower() and "exited" not in s:
-        return "gh (the GitHub CLI) was not found: install it from https://cli.github.com, then run `gh auth login`"
-    if "auth login" in s or "exited 4" in s or "401" in s:
-        return "gh is not signed in: run `gh auth login` (and `gh auth refresh -s notifications` for notification alerts)"
-    return s
 
 
 def load_config(a):
@@ -234,7 +224,7 @@ def run(cfg, a, now=None):
         try:
             me = cfg.get("login") or github.gh_get("user")["login"]
         except Exception as e:
-            unknown("login", gh_hint(e))
+            unknown("login", hint(e) or e)
             st["last_unknown"] = unknowns
             stuck = escalate(st, failed, errs, now, cfg["escalate_after_runs"])
             if not a.dry_run:
@@ -338,24 +328,11 @@ def run(cfg, a, now=None):
         # first complete run.
         sources = ({f"repo:{r}" for r in cfg["repos"]} | {f"extra:{e}" for e in cfg["extras"]} | {"notifications"}
                    | {f"claim:{r}" for r in cfg["repos"] if packs.for_repo(rule_packs, r)["claimable"] and cfg["claim_groups"]})
-        # State from 0.1.0 has only the global flag: everything it watched then counts as seeded, and a
-        # repo added later still seeds quietly instead of alerting on its old /accepts.
-        if "seeded_sources" not in st:
-            had = {k.partition("#")[0] for k in old} | {k.partition("#")[0] for k in st["claimable"]["seen"]}
-            st["seeded_sources"] = sorted(
-                {s for s in sources if s == "notifications" or s.partition(":")[2].partition("#")[0] in had}
-                - {f"extra:{e}" for e in cfg["extras"] if e not in old}) if st["seeded"] else []
-        seeded = set(st["seeded_sources"])
-        ok = lambda src: src in ("slack", "live") or src in seeded  # noqa: E731
-        held = [al for src, al in alerts if not ok(src)]
-        alerts = [al for src, al in alerts if ok(src)]
-        newly = (sources - failed) - seeded
-        seeded |= newly
-        st["seeded_sources"], st["seeded"] = sorted(seeded), sources <= seeded
+        alerts, held, newly = state.hold_until_seeded(st, alerts, sources, failed, old, cfg["extras"])
         if newly:
             log(f"seed run: watching {len(items)} item(s); {len(held)} alert(s) suppressed. "
                 + ("All sources seeded; alerts start next run." if st["seeded"] else
-                   f"Still seeding: {', '.join(sorted(sources - seeded))} (see `status`)."))
+                   f"Still seeding: {', '.join(sorted(sources - set(st['seeded_sources'])))} (see `status`)."))
         if complete:
             st["last_complete"] = now
             state.prune(st, now, cfg["retention_days"], live)
@@ -385,7 +362,7 @@ def status(cfg):
         try:
             print(f"login: {cfg.get('login') or github.gh_get('user')['login']}")
         except Exception as e:
-            print(f"login: FAILED: {gh_hint(e)}")
+            print(f"login: FAILED: {hint(e) or e}")
     print(f"config: {cfg['_path']}{'' if os.path.exists(cfg['_path']) else ' (missing: run gh-upstream-watch init --repos OWNER/REPO)'}")
     try:
         rule_packs = packs.load([config_dir() / "packs", *cfg["packs_dirs"]])
@@ -422,7 +399,7 @@ def status(cfg):
 def init(a):
     path = Path(a.config or config_dir() / "config.json")
     if path.exists() and a.schedule and not a.force and not a.repos:
-        return install_schedule(a)  # config already there: just schedule it
+        return schedule.install(a)  # config already there: just schedule it
     if path.exists() and not a.force:
         raise ConfigError(f"{path} exists; use --force to overwrite")
     if a.schedule and not a.repos:
@@ -432,11 +409,11 @@ def init(a):
     try:
         starter["login"] = a.login or github.gh_get("user")["login"]
     except Exception as e:
-        print(f"note: could not read your login ({gh_hint(e)}); it will be asked of gh on each run", file=sys.stderr)
+        print(f"note: could not read your login ({hint(e) or e}); it will be asked of gh on each run", file=sys.stderr)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(starter, indent=2) + "\n")
     print(f"wrote {path}; {'edit repos, then ' if not a.repos else ''}run: gh-upstream-watch --dry-run")
-    return install_schedule(a) if a.schedule else 0
+    return schedule.install(a) if a.schedule else 0
 
 
 def forget(cfg, a):
@@ -504,92 +481,22 @@ def migrate(cfg, a):
     return 0
 
 
-def template(name):
-    here = Path(__file__).resolve().parent
-    if (here / "contrib" / name).exists():
-        return string.Template((here / "contrib" / name).read_text())
-    raise SystemExit(f"template {name} not found")
-
-
-def minimal_path():
-    """Just the directories of the tools a scheduled run needs, not your whole shell PATH."""
-    dirs = []
-    for tool in (github.gh_binary(), "terminal-notifier", "notify-send", "claude"):
-        found = shutil.which(tool)
-        if found and os.path.dirname(found) not in dirs:
-            dirs.append(os.path.dirname(found))
-    return ":".join(dirs + [d for d in ("/usr/local/bin", "/usr/bin", "/bin") if d not in dirs])
-
-
-def render(a):
-    """The scheduler files, as text: plist, service, timer, cron."""
-    exe = os.path.realpath(sys.argv[0])
-    prog = [sys.executable, exe] if os.path.basename(exe) == "gh-upstream-watch" else [sys.executable, "-m", "gh_upstream_watch.cli"]
-    if a.config:
-        prog += ["--config", os.path.abspath(a.config)]
-    prog.append("--once")
-    fields = {"program": " ".join(prog), "interval_seconds": a.interval * 60, "interval_minutes": a.interval,
-              "path": minimal_path(), "home": str(Path.home()),
-              "program_args": "\n".join(f"    <string>{xml_escape(p)}</string>" for p in prog)}
-    esc = {k: xml_escape(str(v)) for k, v in fields.items() if k != "program_args"}
-    return {"plist": template("launchd.plist.template").substitute(fields, **esc),
-            "service": template("systemd/gh-upstream-watch.service").substitute(fields),
-            "timer": template("systemd/gh-upstream-watch.timer").substitute(fields),
-            "cron": template("cron.txt").substitute(fields)}
-
-
-def printers(a):
-    r = render(a)
-    if a.print_plist:
-        print(r["plist"], end="")
-    if a.print_systemd:
-        print("# ~/.config/systemd/user/gh-upstream-watch.service")
-        print(r["service"])
-        print("# ~/.config/systemd/user/gh-upstream-watch.timer")
-        print(r["timer"], end="")
-    if a.print_cron:
-        print(r["cron"], end="")
-    return 0
-
-
-PLIST = "Library/LaunchAgents/local.gh-upstream-watch.plist"
-
-
-def install_schedule(a, run=subprocess.run):
-    """Write and load the scheduler for this machine: launchd on macOS, a systemd user timer where
-    systemctl exists, otherwise print the cron line to add by hand."""
-    r = render(a)
-    if sys.platform == "darwin":
-        p = Path.home() / PLIST
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(r["plist"])
-        domain = f"gui/{os.getuid()}"
-        run(["launchctl", "bootout", domain, str(p)], capture_output=True)  # an older copy, if loaded
-        run(["launchctl", "bootstrap", domain, str(p)], check=True, capture_output=True)
-        print(f"scheduled every {a.interval} min: {p} (loaded; logs in ~/Library/Logs/gh-upstream-watch.log)")
-    elif shutil.which("systemctl"):
-        d = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "gh-upstream-watch.service").write_text(r["service"])
-        (d / "gh-upstream-watch.timer").write_text(r["timer"])
-        run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
-        run(["systemctl", "--user", "enable", "--now", "gh-upstream-watch.timer"], check=True, capture_output=True)
-        print(f"scheduled every {a.interval} min: {d}/gh-upstream-watch.timer (enabled; logs: journalctl --user -u gh-upstream-watch)")
-    else:
-        print("no launchd or systemd here; add this line with `crontab -e`:\n" + r["cron"], end="")
-    return 0
-
-
 def main(argv=None):
     a = build_parser().parse_args(argv)
     if a.print_plist or a.print_systemd or a.print_cron:
         if not (1 <= a.interval < 60 and 60 % a.interval == 0 if a.print_cron else 1 <= a.interval <= 1440):
             log("error: --interval must divide 60 for cron (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30), 1-1440 otherwise")
             return 2
-        return printers(a)
+        return schedule.printers(a)
     try:
         if a.command == "init":
             return init(a)
+        if a.command == "check-pack":
+            if not a.keys:
+                raise ConfigError("check-pack needs one or more pack files")
+            for f in a.keys:
+                print("\n".join(packs.check(f)))
+            return 0
         cfg = load_config(a)
         if a.command == "status":
             return status(cfg)

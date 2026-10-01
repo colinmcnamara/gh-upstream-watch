@@ -97,6 +97,32 @@ def load(extra_dirs=()):
     return list(packs.values())
 
 
+def check(path):
+    """Validate one pack file and describe what it does, for `check-pack`. Raises PackError."""
+    path = Path(path).expanduser()
+    try:
+        pack = validate(json.loads(path.read_text()), path)
+    except (OSError, ValueError) as e:
+        raise PackError(f"{path}: {e}")
+
+    def trust(by):
+        by = by or {}
+        return f"logins {by['logins']}" if by.get("logins") else f"associations {by.get('associations', DEFAULT_ASSOCIATIONS)}"
+    out = [f"{path}: ok", f"  id {pack['id']}" + (" (replaces the bundled pack)" if (BUNDLED / f"{pack['id']}.json").exists()
+                                                 and BUNDLED not in path.resolve().parents else ""),
+           f"  repos {pack.get('repos', [])}"]
+    for g in pack.get("gates", []):
+        out.append(f"  gate {g['id']}: comment `{g['comment']}`, trusts {trust(g['authorized_by'])}"
+                   + (f", then `{g['then']}`" if g.get("then") else ""))
+    for t in pack.get("label_transitions", []):
+        out.append(f"  label rule {t['id']}: has {t.get('has', [])}, lacks {t.get('lacks', [])}")
+    for q in pack.get("quiet_titles", []):
+        out.append(f"  quiet title `{q}`: alerts only on comments naming you")
+    if pack.get("claimable"):
+        out.append(f"  claim board `{pack['claimable']['title']}`: trusts {trust(pack['claimable'].get('authorized_by'))}")
+    return out
+
+
 def for_repo(packs, repo):
     """The effective rules for one repo: every matching pack merged, catch-all ('*') packs first."""
     hits = [p for p in packs if any(fnmatch.fnmatch(repo.lower(), g.lower()) for g in p["repos"])]
