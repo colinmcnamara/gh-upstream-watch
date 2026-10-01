@@ -36,3 +36,17 @@ def test_readme_config_keys_are_real():
     for c in configs:
         assert set(c) <= set(cli.DEFAULTS), set(c) - set(cli.DEFAULTS)
     assert set(cli.DEFAULTS) <= set(configs[0]), f"undocumented keys: {set(cli.DEFAULTS) - set(configs[0])}"
+
+
+def test_readme_demo_matches_the_golden_run():
+    golden = (Path(__file__).resolve().parent / "fixtures" / "demo" / "run2.golden").read_text().splitlines()
+    shown = [re.sub(r"^\[[^]]+\] ", "", line) for line in README.splitlines() if line.startswith("[2026-")]
+    assert shown == golden
+
+
+def test_every_alert_kind_is_documented():
+    from gh_upstream_watch import core
+    row = next(line for line in README.splitlines() if line.startswith("| `kind` |"))
+    listed = set(re.findall(r"`(\w+)`", row)) - {"kind"}
+    emitted = core.ACTION_KINDS | {"gate_done", "reference", "state", "labels", "merged", "review", "comments", "gone"}
+    assert emitted <= listed, emitted - listed

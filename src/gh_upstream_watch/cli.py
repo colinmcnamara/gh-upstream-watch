@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 from . import __version__, core, github, hooks, notify, packs, schedule, slack, state
@@ -169,8 +170,23 @@ def escalate(st, failed, errs, now, after):
     return out
 
 
+def upgrade(al):
+    """Alerts an older version left in the outbox get the v1 fields before they are delivered."""
+    al.setdefault("v", 1)
+    al.setdefault("action", al.get("kind") in core.ACTION_KINDS)
+    if "ts" not in al:
+        try:
+            al["ts"] = datetime.strptime(al.get("time", ""), "%Y-%m-%d %H:%M").astimezone().isoformat(timespec="seconds")
+        except ValueError:
+            al["ts"] = ""
+    return al
+
+
 def alert(now, kind, key, title, message, url):
-    return {"time": time.strftime("%Y-%m-%d %H:%M", time.localtime(now)), "kind": kind, "key": key,
+    """One alert. `action` says it needs you; `ts` is ISO 8601 with the offset; `v` versions the shape."""
+    return {"v": 1, "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(now)),
+            "ts": datetime.fromtimestamp(now).astimezone().isoformat(timespec="seconds"),
+            "kind": kind, "action": kind in core.ACTION_KINDS, "key": key,
             "title": title, "message": message, "url": url or ""}
 
 
@@ -186,11 +202,26 @@ def run(cfg, a, now=None):
     dests = notify.destinations(backend, webhook)
 
     def flush(entries):
-        """Deliver outbox entries; keep each one with the destinations that still failed."""
+        """Deliver outbox entries; keep each one with the destinations that still failed. More than
+        BATCH desktop alerts at once become one banner; stdout and the webhook still get every alert."""
         keep = []
         for e in entries:
+            upgrade(e["alert"])
+        # Only pop-up banners batch: a `command` backend is a program that expects every alert.
+        waiting = [e for e in entries if "desktop" in e["pending"] and "desktop" in dests]
+        batch = backend in notify.BANNERS and len(waiting) > notify.BATCH
+        if batch:
+            shown = notify.send_one("desktop", notify.summary([e["alert"] for e in waiting]), backend)
+            for e in waiting:
+                # Shown: done. Not shown: try the banner again next run, never one pop-up per alert now.
+                e["pending"].remove("desktop")
+                e["_retry_desktop"] = not shown
+        for e in entries:
             e["pending"] = [d for d in e["pending"] if d in dests]
-            if notify.deliver(e, backend, a.json, webhook):
+            pending = notify.deliver(e, backend, a.json, webhook)
+            if e.pop("_retry_desktop", False):
+                pending.append("desktop")
+            if pending:
                 e["attempts"] = e.get("attempts", 0) + 1
                 if e["attempts"] < MAX_ATTEMPTS:
                     keep.append(e)
@@ -228,9 +259,10 @@ def run(cfg, a, now=None):
             st["last_unknown"] = unknowns
             stuck = escalate(st, failed, errs, now, cfg["escalate_after_runs"])
             if not a.dry_run:
-                st["outbox"] += [{"alert": al, "pending": list(dests)} for al in stuck]
+                kept, new = st["outbox"], [{"alert": al, "pending": list(dests)} for al in stuck]
+                st["outbox"] = kept + new
                 state.save(path, st)
-                st["outbox"] = flush(st["outbox"])
+                st["outbox"] = kept + flush(new)  # kept entries were already tried once this run
                 state.save(path, st)
             return 1
 
@@ -338,6 +370,7 @@ def run(cfg, a, now=None):
             state.prune(st, now, cfg["retention_days"], live)
         # Not seen by anyone if it only goes to a launchd log: one real alert per streak.
         alerts += escalate(st, failed, errs, now, cfg["escalate_after_runs"])
+        alerts.sort(key=lambda al: not al["action"])  # what needs you first; stable within each group
         if a.dry_run:
             for al in alerts:
                 notify.send_one("stdout", al, as_json=a.json)
@@ -347,52 +380,84 @@ def run(cfg, a, now=None):
             return 0 if complete else 1
         # Written before delivery: a crash re-delivers instead of losing them, and a failed destination
         # stays pending for the next run.
-        st["outbox"] += [{"alert": al, "pending": list(dests)} for al in alerts]
+        kept, new = st["outbox"], [{"alert": al, "pending": list(dests)} for al in alerts]
+        st["outbox"] = kept + new
         state.save(path, st)
-        st["outbox"] = flush(st["outbox"])
+        st["outbox"] = kept + flush(new)  # kept entries were already tried once this run, at the top
         state.save(path, st)
     return 0 if complete else 1
 
 
+def ago(t, now=None):
+    """'14 min ago' style, for status."""
+    d = int((now or time.time()) - t)
+    if d < 120:
+        return f"{d} s ago"
+    if d < 7200:
+        return f"{d // 60} min ago"
+    return f"{d // 3600} h ago" if d < 172800 else f"{d // 86400} days ago"
+
+
 def status(cfg):
-    """A doctor: gh and login, config, repos and their packs, and what the last run could not check."""
+    """A doctor: setup, schedule, the last run, what is watched, and what needs fixing, with the fix."""
+    def row(label, value):
+        print(f"  {label:<13} {value}")
+
+    when = lambda t: f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(t))} ({ago(t)})"  # noqa: E731
+    print("setup")
     gh = shutil.which(github.gh_binary())
-    print(f"gh: {gh or 'NOT FOUND (install from https://cli.github.com)'}")
+    row("gh", gh or "NOT FOUND: install it from https://cli.github.com")
     if gh:
         try:
-            print(f"login: {cfg.get('login') or github.gh_get('user')['login']}")
+            row("login", "@" + (cfg.get("login") or github.gh_get("user")["login"]))
         except Exception as e:
-            print(f"login: FAILED: {hint(e) or e}")
-    print(f"config: {cfg['_path']}{'' if os.path.exists(cfg['_path']) else ' (missing: run gh-upstream-watch init --repos OWNER/REPO)'}")
+            row("login", f"FAILED: {hint(e) or e}")
+    row("config", cfg["_path"] + ("" if os.path.exists(cfg["_path"]) else " (missing: gh-upstream-watch init --repos OWNER/REPO)"))
     try:
         rule_packs = packs.load([config_dir() / "packs", *cfg["packs_dirs"]])
         for repo in cfg["repos"] or ["(none)"]:
-            print(f"repo {repo}: packs {', '.join(packs.for_repo(rule_packs, repo)['ids'])}")
+            row("repo", f"{repo} (packs: {', '.join(packs.for_repo(rule_packs, repo)['ids'])})")
     except packs.PackError as e:
-        print(f"packs: ERROR {e}")
+        row("packs", f"ERROR {e}")
+    row("schedule", schedule.describe())
     path = cfg["state"]
+    print("state")
+    row("file", path)
     if not os.path.exists(path):
-        print(f"state: {path} (none yet; the first run seeds quietly)")
+        row("runs", "none yet; the first run seeds quietly")
         return 0
     st = state.load(path)
     last = st.get("last_complete")
-    print(f"state: {path}")
-    print(f"seeded {st['seeded']}, last complete run {time.strftime('%Y-%m-%d %H:%M', time.localtime(last)) if last else 'never'}")
-    if not st["seeded"]:
-        print(f"seeded so far: {', '.join(st.get('seeded_sources') or []) or 'nothing'} (the rest seed on their first complete run)")
-    if st.get("retry"):
-        print(f"waiting for a first baseline: {', '.join(sorted(st['retry']))}")
+    row("last complete", when(last) if last else "never")
+    if st["seeded"]:
+        row("seeded", "yes")
+    else:
+        row("seeded", f"not yet; done: {', '.join(st.get('seeded_sources') or []) or 'nothing'}")
     open_items = sum(1 for v in st["items"].values() if v.get("state") == "open")
-    print(f"items: {len(st['items'])} ({open_items} open); notifications seen: {len(st['notifications']['seen'])}; "
-          f"claim rows seen: {len(st['claimable']['seen'])}; outbox: {len(st['outbox'])}")
-    for u in st.get("last_unknown") or []:
-        print(f"unknown last run: {u}")
-        if hint(u):
-            print(f"  fix: {hint(u)}")
-    for src, s in sorted((st.get("unknown_streak") or {}).items()):
-        print(f"{src}: unknown for {s['runs']} run(s) in a row, since {time.strftime('%Y-%m-%d %H:%M', time.localtime(s['since']))}")
+    row("watching", f"{len(st['items'])} items ({open_items} open); {len(st['notifications']['seen'])} notifications "
+                    f"and {len(st['claimable']['seen'])} claim rows already alerted")
+    if st.get("retry"):
+        row("waiting", f"first baseline for {', '.join(sorted(st['retry']))}")
+    if st["outbox"]:
+        row("undelivered", f"{len(st['outbox'])} alert(s) pending for " +
+            ", ".join(sorted({d for e in st["outbox"] for d in e["pending"]})) + "; retried next run")
     if st["slack"]:
-        print(f"slack: failures {st['slack'].get('failures', 0)}, last error {st['slack'].get('last_error')}")
+        row("slack", f"{st['slack'].get('failures', 0)} failure(s) in a row" +
+            (f", last: {st['slack']['last_error']}" if st["slack"].get("last_error") else ""))
+    problems = st.get("last_unknown") or []
+    streak = st.get("unknown_streak") or {}
+    slack_failing = st["slack"].get("failures", 0) > 0
+    print("problems" if problems or streak or st["outbox"] or slack_failing else "problems: none")
+    if st["outbox"]:
+        row("undelivered", "see above; check the notifier or webhook, then the next run retries")
+    if slack_failing:
+        row("slack", "failing; see above")
+    for u in problems:
+        row("unknown", u)
+        if hint(u):
+            row("  fix", hint(u))
+    for src, s in sorted(streak.items()):
+        row("failing", f"{src}: {s['runs']} run(s) in a row, since {when(s['since'])}")
     return 0
 
 

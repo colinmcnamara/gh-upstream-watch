@@ -119,7 +119,7 @@ def test_quiet_issue_edit_that_adds_a_mention_counts():
             "labels": [], "assignees": [], "xrefs": [], "gates": {}, "human_comments": 2, "human_ids": [3, 5]}
     old = dict(base, max_comment_id=5, mention_ids=[5], mentions_me=1)
     new = dict(base, max_comment_id=5, mention_ids=[3, 5], mentions_me=2)  # comment 3 edited to name you
-    assert core.changes(old, new, "octocat", rules) == [("mentions", "1 comment(s) naming you", None)]
+    assert core.changes(old, new, "octocat", rules) == [("mentions", "1 comment naming you", None)]
 
 
 @pytest.mark.parametrize("heading,found", [("## [0.1.1] - 2026-09-30", True), ("## [0.1.1]", True),

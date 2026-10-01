@@ -236,8 +236,9 @@ def test_init_and_status(tmp_path, capsys, fake):
     capsys.readouterr()
     assert cli.main(["status", "--config", str(cfg), "--state", str(st)]) == 0
     out = capsys.readouterr().out
-    assert "login: octocat" in out and "repo acme/widgets: packs generic" in out
-    assert "unknown last run: acme/widgets#390" in out
+    assert "login         @octocat" in out and "repo          acme/widgets (packs: generic" in out
+    assert "unknown       acme/widgets#390" in out and "failing       repo:acme/widgets: 1 run(s) in a row" in out
+    assert "seeded        yes" in out and "last complete" in out and "schedule" in out
 
 
 def test_bundled_gate_trusts_owner_and_collaborator_only():

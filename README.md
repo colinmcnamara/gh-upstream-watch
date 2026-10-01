@@ -48,18 +48,19 @@ notifications follow `--repos`. This is the real output:
 
 ```text
 $ gh-upstream-watch --repos acme/widgets --packs-dir tests/fixtures/packs --notify none
-2026-09-30 08:24 seed run: watching 4 item(s); 1 alert(s) suppressed. Alerts start after the first complete run.
+2026-09-30 08:24 seed run: watching 4 item(s); 1 alert(s) suppressed. All sources seeded; alerts start next run.
 
 $ gh-upstream-watch --repos acme/widgets --packs-dir tests/fixtures/packs --notify none
 [2026-09-30 08:24] acme/widgets#388 Document the retry flag: REOPENED: claim it (https://github.com/acme/widgets/issues/388)
 [2026-09-30 08:24] acme/widgets#390 Widget spins forever on an empty config: ACCEPTED by @maint: comment /assign now (https://github.com/acme/widgets/issues/390)
 [2026-09-30 08:24] acme/widgets#390 Widget spins forever on an empty config: COMPETING PR #401 (by @monalisa) says Closes #390: check scope before /assign (https://github.com/acme/widgets/pull/401)
-[2026-09-30 08:24] acme/widgets#392 Add retry backoff: review: @maint APPROVED (https://github.com/acme/widgets/pull/392)
-[2026-09-30 08:24] acme/widgets#395 [Community] Weekly sync thread: 1 comment(s) naming you (https://github.com/acme/widgets/issues/395)
+[2026-09-30 08:24] acme/widgets#395 [Community] Weekly sync thread: 1 comment naming you (https://github.com/acme/widgets/issues/395)
 [2026-09-30 08:24] acme/widgets: someone requested your review: Tighten lint config (https://github.com/acme/widgets/pull/14)
+[2026-09-30 08:24] acme/widgets#392 Add retry backoff: APPROVED by @maint (https://github.com/acme/widgets/pull/392)
 ```
 
-The same two runs are a golden test (`tests/test_run.py`).
+The same two runs are a golden test (`tests/test_run.py`), and `tests/test_docs.py` keeps this
+transcript identical to it. Alerts that need you come first; information (here, a review) follows.
 
 ## Install
 
@@ -166,7 +167,9 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
 `state: null` keeps the state file at `$XDG_STATE_HOME/gh-upstream-watch/state.json`
 (default `~/.local/state/...`); it is written mode 0600.
 
-Notifications: stdout always (text with the URL, or `--json` for JSON lines). `notify: auto` uses
+Notifications: stdout always (text with the URL, or `--json` for JSON lines). When more than three
+alerts arrive in one run, the desktop gets one banner ("6 alerts, 5 need action: ...") instead of
+six; stdout and the webhook still get every alert. `notify: auto` uses
 `$GH_UPSTREAM_WATCH_NOTIFY` (a command that gets the alert JSON on stdin) if set, else
 `terminal-notifier`, `notify-send`, or `osascript` (macOS; the URL is kept in the visible text,
 since those banners cannot open a link; the text is passed as arguments, never as script).
@@ -175,6 +178,22 @@ localhost), and only a 2xx answer counts; a redirect is a failure and is not fol
 stays in the outbox and is retried on later runs (up to 5), without printing the alert again.
 Only `https://github.com/` links (and `https://*.slack.com/` for Slack) are passed to a notifier
 to open; a link from comment text that points elsewhere is replaced by the item's own URL.
+
+### `--json` and webhook fields
+
+One JSON object per alert (the webhook sends it as `alert`). These fields are stable within
+`"v": 1`; a change to them bumps `v`.
+
+| field | meaning |
+| --- | --- |
+| `v` | shape version, `1` |
+| `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `review`, `changes_requested`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
+| `action` | `true` when it needs you to do something (gates, competing PRs, reopens, requested changes, assignments, asks, claims, escalations) |
+| `key` | `owner/repo#n`, `owner/repo` for notifications, the source for `stuck` |
+| `title`, `message` | the human text; the text line is `title: message (url)` |
+| `url` | a `https://github.com/` or `https://*.slack.com/` link, or empty |
+| `ts` | ISO 8601 with the UTC offset, for machines |
+| `time` | local `YYYY-MM-DD HH:MM`, for people |
 
 ## Rule packs
 

@@ -7,6 +7,13 @@ from . import github
 from .packs import authorized, parse_claimable
 
 KEEP_IDS = 200
+# Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
+ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
+                "mentions", "slack", "stuck", "changes_requested"}
+
+
+def plural(n, word):
+    return f"{n} {word}{'' if n == 1 else 's'}"
 BOTS = ("coderabbitai", "mergify", "github-actions", "dependabot", "codecov")
 ASKS = {"mention": "mentioned you", "team_mention": "mentioned your team",
         "review_requested": "requested your review", "assign": "assigned you"}
@@ -135,7 +142,7 @@ def changes(old, new, me, rules):
         hit = new.get("gates", {}).get(g["id"])
         if hit and g["id"] not in (old or {}).get("gates", {}):
             text = (g.get("alert_done") or g["id"].upper() + " by @{actor}") if hit["done"] else g["alert"]
-            out.append(("gate", text.format(actor=hit["by"]), None))
+            out.append(("gate_done" if hit["done"] else "gate", text.format(actor=hit["by"]), None))
             fired += 0 if hit.get("bot") else 1
             fired_ids.add(hit.get("cid"))
     if old is None:
@@ -151,8 +158,8 @@ def changes(old, new, me, rules):
             out.append(("label_rule", t["alert"], None))
     if old.get("state") == "closed" and new["state"] == "open" and me not in new["assignees"]:
         out.append(("reopened", msg.get("reopened", "REOPENED"), None))
-    elif old.get("state") != new["state"]:
-        out.append(("state", f"state: {old.get('state')} -> {new['state']}", None))
+    elif old.get("state") != new["state"] and not (new.get("merged") and not old.get("merged")):
+        out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
     added = sorted(set(new["labels"]) - set(old.get("labels", [])))
     removed = sorted(set(old.get("labels", [])) - set(new["labels"]))
     if added or removed:
@@ -163,7 +170,8 @@ def changes(old, new, me, rules):
     legacy = {tuple(r) for r in old.get("reviews", []) if len(r) == 2}  # v0 state stored (login, state)
     fresh = [r for r in new.get("reviews", []) if r[0] not in known_ids and (r[1], r[2]) not in legacy]
     if fresh:
-        out.append(("review", "review: " + ", ".join(f"@{u} {st}" for _, u, st in fresh), None))
+        kind = "changes_requested" if any(st == "CHANGES_REQUESTED" for _, _, st in fresh) else "review"
+        out.append((kind, ", ".join(f"{st.replace('_', ' ')} by @{u}" for _, u, st in fresh), None))
     known = {ref[0]: ref for ref in old.get("xrefs", [])}
     target = new["url"].rstrip("/").split("/")[-1]
     for url, kind, author, cl in new.get("xrefs", []):
@@ -184,14 +192,14 @@ def changes(old, new, me, rules):
         d = (len(set(new.get("mention_ids", [])) - set(old.get("mention_ids", []))) if since is not None
              else new.get("mentions_me", 0) - old.get("mentions_me", 0))
         if d > 0:
-            out.append(("mentions", f"{d} comment(s) naming you", None))
+            out.append(("mentions", f"{plural(d, 'comment')} naming you", None))
     else:
         if since is not None:
             d = sum(1 for i in new.get("human_ids", []) if i > since and i not in fired_ids)
         else:  # state from before v0.1.1 has counts only
             d = new["human_comments"] - old.get("human_comments", 0) - fired  # a gate comment already alerted
         if d > 0:
-            out.append(("comments", f"{d} new comment(s) from people", None))
+            out.append(("comments", f"{plural(d, 'new comment')}", None))
     return out
 
 

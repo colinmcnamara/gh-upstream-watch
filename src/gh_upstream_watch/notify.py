@@ -97,6 +97,19 @@ def send_one(dest, alert, backend="none", as_json=False, webhook=None):
         return False
 
 
+BATCH = 3  # more desktop alerts than this in one run become one banner
+BANNERS = ("terminal-notifier", "notify-send", "osascript")
+
+
+def summary(alerts):
+    """One banner standing in for many: the count, how many need you, and the first one that does."""
+    act = [a for a in alerts if a.get("action")]
+    lead = (act or alerts)[0]
+    need = f", {len(act)} need action" if act else ""
+    return dict(lead, kind="summary", title=f"gh-upstream-watch: {len(alerts)} alerts{need}",
+                message=f"{lead['title']}: {lead['message']}"[:200])
+
+
 def deliver(entry, backend="none", as_json=False, webhook=None):
     """Try every destination still pending for an outbox entry; returns what is still pending."""
     entry["pending"] = [d for d in entry["pending"] if not send_one(d, entry["alert"], backend, as_json, webhook)]
