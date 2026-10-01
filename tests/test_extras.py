@@ -326,3 +326,23 @@ def test_check_pack_validates_and_describes(tmp_path, capsys):
 ])
 def test_hint_gives_the_next_step(err, fix):
     assert fix in cli.hint(err) if fix else cli.hint(err) == ""
+
+
+def test_slack_messages_seen_by_the_old_script_do_not_repeat():
+    """The single-file script keyed Slack messages as '#channel:ts'; a migrated state must still match."""
+    ts = f"{T - 60:.6f}"
+    st = {"last": 0, "seeded": True, "seen": {f"#dev:{ts}": float(ts)}}
+    assert slack.check(CFG, st, T, answer([reply(ts)])) == []
+    assert f"C0EXAMPLE:{ts}" in st["seen"], "remembered under the new key from now on"
+    assert len(slack.check(CFG, dict(st, last=0), T, answer([reply(f"{T - 30:.6f}")]))) == 1, "a new one still alerts"
+
+
+def test_migrate_says_how_to_absorb_old_history(tmp_path, capsys):
+    v0 = tmp_path / "old.json"
+    v0.write_text((FIXTURES / "state_v0.json").read_text())
+    new = tmp_path / "new.json"
+    assert cli.main(["migrate", "--from", str(v0), "--state", str(new), "--repos", "acme/widgets"]) == 0
+    out = capsys.readouterr().out
+    assert f"--state {new} --repos acme/widgets --notify none --webhook '' --no-slack" in out
+    assert "old job is still running" in out
+

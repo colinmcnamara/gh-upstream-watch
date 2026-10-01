@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1] - 2026-10-01
+
+Fixes from migrating a real watcher off the single-file script.
+
+- Slack messages the old script recorded by channel name (`#channel:ts`) count as seen, so a
+  migrated watcher does not repeat them. Before, the first Slack check after migrating could repeat
+  every reply from the last `days`.
+- `migrate` prints the step that keeps old history from arriving as a burst: one
+  `--notify none --webhook '' --no-slack` run (with your `--config` or `--repos`) while the old job
+  is still running. The old script read only the
+  first 100 timeline events of each item, so the new one finds older references on busy threads.
+  The README's migration section walks through the four steps.
+
 ## [0.2.0] - 2026-10-01
 
 Craft: the output you read. Minor version because alert wording and the `--json` fields changed.

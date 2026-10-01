@@ -3,6 +3,7 @@ launchd, systemd or cron (--print-plist / --print-systemd / --print-cron)."""
 import argparse
 import json
 import os
+import shlex
 import shutil
 import sys
 import time
@@ -543,6 +544,12 @@ def migrate(cfg, a):
     state.save(dest, st)
     print(f"migrated {len(st['items'])} items, {len(st['notifications']['seen'])} notification ids, "
           f"{len(st['claimable']['seen'])} claim rows, {len(st['slack'].get('seen', {}))} Slack ids -> {dest}")
+    # Same config and repos as this command, and every notifier off (a webhook too) for the quiet run.
+    argv = ["--state", dest] + (["--config", a.config] if a.config else []) + (["--repos", *a.repos] if a.repos else [])
+    print("next, while the old job is still running: gh-upstream-watch " + " ".join(shlex.quote(x) for x in argv)
+          + " --notify none --webhook '' --no-slack\n  This records history the old script could not see (it read only the first 100 timeline"
+          "\n  events of each item), so it does not arrive as a burst of alerts. The old job keeps alerting"
+          "\n  on anything new meanwhile. Then compare with --dry-run and switch the scheduler over.")
     return 0
 
 

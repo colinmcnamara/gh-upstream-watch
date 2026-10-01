@@ -304,7 +304,17 @@ this before enabling it:
 
 `gh-upstream-watch migrate --from OLD_STATE.json --state NEW_STATE.json --claim-repo owner/repo`
 converts a v0 state file (one flat dict of fingerprints plus `_notifications`, `_slack`,
-`_claimable`). Fingerprints and seen ids are kept, so nothing re-alerts and nothing re-seeds.
+`_claimable`). Fingerprints and seen ids are kept; Slack messages the old script keyed by channel
+name still count as seen.
+
+The old script read only the first 100 timeline events of each item, so on a busy thread the new
+one finds references the old one never saw. To keep that history from arriving as one burst:
+
+1. Leave the old scheduled job running.
+2. Run `gh-upstream-watch --state NEW_STATE.json --notify none --webhook '' --no-slack` once (add the
+   same `--config` or `--repos` you use). It records that history without notifying anyone; the old job still alerts on anything new.
+3. `gh-upstream-watch --dry-run` should now be as quiet as the old job.
+4. Unload the old job and `gh-upstream-watch init --schedule`.
 
 ## License
 
