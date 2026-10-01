@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0] - 2026-10-01
+
+Craft: the output you read. Minor version because alert wording and the `--json` fields changed.
+
+- Alerts that need you (gates with a call to action, competing PRs, reopens, assignments, asks,
+  claims, escalations) come first, in stdout, desktop and webhook alike.
+- More than three alerts in one run become one desktop banner ("6 alerts, 5 need action: ...");
+  stdout and the webhook still get every alert.
+- Natural wording: `1 new comment` / `2 new comments`, `APPROVED by @maint`, `closed` / `reopened`
+  (a merged PR says `MERGED` only). A gate already answered is now kind `gate_done`.
+- `--json` and webhook alerts gain `v` (1), `action` (needs you) and `ts` (ISO 8601 with offset);
+  every field is documented in the README as a stable contract.
+- `status` reads like a doctor: setup, schedule (launchd or systemd installed and loaded), state
+  with "14 min ago", pending deliveries, and problems with their fix.
+- Tests keep the README demo identical to the golden run and every alert kind documented.
+- A review requesting changes is its own kind, `changes_requested`, and needs you.
+- Batching applies to pop-up backends only; a `$GH_UPSTREAM_WATCH_NOTIFY` command still gets every
+  alert. A banner that fails is retried as one banner next run, never as a burst of pop-ups.
+- Fixed (since 0.1.0): a failing destination was retried twice per run and dropped after 3 runs
+  instead of 5. Alerts an older version left in the outbox get `v`, `action` and `ts` on replay.
+- `status` counts undelivered alerts and Slack failures as problems, and does not tell cron users
+  on Linux to set up systemd.
+
 ## [0.1.3] - 2026-10-01
 
 Structure: easier to change safely.

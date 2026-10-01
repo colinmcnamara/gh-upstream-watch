@@ -86,3 +86,19 @@ def install(a, run=subprocess.run):
     else:
         print("no launchd or systemd here; add this line with `crontab -e`:\n" + r["cron"], end="")
     return 0
+
+
+def describe(run=subprocess.run):
+    """Whether this machine's scheduler has the job, for status."""
+    if sys.platform == "darwin":
+        p = Path.home() / PLIST
+        if not p.exists():
+            return "not installed (gh-upstream-watch init --schedule)"
+        r = run(["launchctl", "print", f"gui/{os.getuid()}/local.gh-upstream-watch"], capture_output=True)
+        return f"launchd, {'loaded' if r.returncode == 0 else 'NOT loaded: launchctl bootstrap gui/$(id -u) ' + str(p)}"
+    if shutil.which("systemctl"):
+        r = run(["systemctl", "--user", "is-active", "gh-upstream-watch.timer"], capture_output=True, text=True)
+        active = (r.stdout or "").strip() == "active"
+        return ("systemd timer, active" if active else
+                "systemd timer not active (gh-upstream-watch init --schedule; if you use cron, check `crontab -l`)")
+    return "cron or none (check `crontab -l`)"

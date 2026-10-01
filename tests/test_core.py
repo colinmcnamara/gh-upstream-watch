@@ -32,7 +32,7 @@ def test_first_sight_evaluates_gates_once():
     assert ch(accepted, dict(accepted)) == []
     assert ch({**base, "human_comments": 2}, accepted) == ["ACCEPTED by @maint: comment /assign now"], \
         "the /accept comment is not counted again as a new comment"
-    assert ch({**base, "human_comments": 1}, accepted)[1] == "1 new comment(s) from people"
+    assert ch({**base, "human_comments": 1}, accepted)[1] == "1 new comment"
 
 
 def test_gate_alerts_once_with_next_action():
@@ -60,13 +60,13 @@ def test_label_transition_alerts_once():
 
 def test_reviews_labels_merged_comments():
     pr = {**base, "reviews": [], "merged": False}
-    assert ch(pr, {**pr, "reviews": [[1, "maint", "APPROVED"]]}) == ["review: @maint APPROVED"]
+    assert ch(pr, {**pr, "reviews": [[1, "maint", "APPROVED"]]}) == ["APPROVED by @maint"]
     assert ch({**pr, "reviews": [[1, "maint", "COMMENTED"]]}, {**pr, "reviews": [[1, "maint", "COMMENTED"], [2, "maint", "APPROVED"]]}) \
-        == ["review: @maint APPROVED"], "only reviews that are new"
+        == ["APPROVED by @maint"], "only reviews that are new"
     assert ch(pr, {**pr, "labels": ["ready"]}) == ["labels: +ready"]
     assert ch({**pr, "labels": ["wip"]}, {**pr, "labels": ["ready"]}) == ["labels: +ready -wip"]
     assert ch(pr, {**pr, "merged": True}) == ["MERGED"]
-    assert ch(base, {**base, "human_comments": 2}) == ["2 new comment(s) from people"]
+    assert ch(base, {**base, "human_comments": 2}) == ["2 new comments"]
 
 
 def test_xrefs():
@@ -84,14 +84,14 @@ def test_reopen():
     closed = {**base, "state": "closed"}
     assert ch(closed, {**closed, "state": "open"}) == ["REOPENED: comment /assign now"]
     assert ch(closed, {**closed, "state": "open"}, GENERIC) == ["REOPENED: claim it"]
-    assert ch({**closed, "assignees": [ME]}, {**closed, "state": "open", "assignees": [ME]}) == ["state: closed -> open"]
+    assert ch({**closed, "assignees": [ME]}, {**closed, "state": "open", "assignees": [ME]}) == ["reopened"]
 
 
 def test_quiet_titles_alert_only_on_mentions():
     wg = {**base, "title": "[WG] Data plane charter", "mentions_me": 0}
     assert ch(wg, {**wg, "human_comments": 3}) == []
-    assert ch(wg, {**wg, "human_comments": 1, "mentions_me": 1}) == ["1 comment(s) naming you"]
-    assert ch({**base, "title": "[Bug] x"}, {**base, "title": "[Bug] x", "human_comments": 1}) == ["1 new comment(s) from people"]
+    assert ch(wg, {**wg, "human_comments": 1, "mentions_me": 1}) == ["1 comment naming you"]
+    assert ch({**base, "title": "[Bug] x"}, {**base, "title": "[Bug] x", "human_comments": 1}) == ["1 new comment"]
 
 
 @pytest.mark.parametrize("body,hit", [
@@ -254,7 +254,7 @@ def test_review_ids_catch_a_second_approval(fake):
     """Item 10: approve, changes requested, approve again: the second approval is a new review."""
     old = {**base, "reviews": [[1, "maint", "APPROVED"], [2, "maint", "CHANGES_REQUESTED"]]}
     new = {**old, "reviews": old["reviews"] + [[3, "maint", "APPROVED"]]}
-    assert ch(old, new) == ["review: @maint APPROVED"]
+    assert ch(old, new) == ["APPROVED by @maint"]
     legacy = {**base, "reviews": [["maint", "APPROVED"]]}  # v0 state: no ids
     assert ch(legacy, {**base, "reviews": [[1, "maint", "APPROVED"]]}) == [], "migrated reviews do not re-alert"
 
@@ -291,19 +291,19 @@ def test_an_edit_that_makes_a_known_reference_closing_alerts():
 def test_a_deleted_comment_cannot_hide_a_new_one():
     old = fp(human_comments=1, human_ids=[10], max_comment_id=10)
     new = fp(human_comments=1, human_ids=[12], max_comment_id=12)  # #10 deleted, #12 is new
-    assert core.changes(old, new, ME, ACME) == [("comments", "1 new comment(s) from people", None)]
+    assert core.changes(old, new, ME, ACME) == [("comments", "1 new comment", None)]
 
 
 def test_renaming_an_issue_to_a_quiet_title_does_not_silence_it():
     old = fp(human_ids=[10], human_comments=1)
     new = fp(title="[Community] Bug", human_ids=[10, 11], human_comments=2, max_comment_id=11)
-    assert ("comments", "1 new comment(s) from people", None) in core.changes(old, new, ME, ACME)
+    assert ("comments", "1 new comment", None) in core.changes(old, new, ME, ACME)
 
 
 def test_state_from_before_ids_still_diffs_by_count():
     old = {k: v for k, v in fp(human_comments=1).items() if k not in ("max_comment_id", "human_ids", "mention_ids")}
     assert core.changes(old, fp(human_comments=3, human_ids=[11, 12, 13]), ME, ACME) == [
-        ("comments", "2 new comment(s) from people", None)]
+        ("comments", "2 new comments", None)]
 
 
 def test_an_older_assign_does_not_answer_a_new_accept(fake):

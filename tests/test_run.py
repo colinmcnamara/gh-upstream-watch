@@ -351,7 +351,7 @@ def test_status_prints_the_fix(watch, capsys):
                      {"__error__": "gh: Not Found (HTTP 404) notifications"}})
     cli.main(["status", "--state", str(watch.path), "--repos", "acme/widgets"])
     out = capsys.readouterr().out
-    assert "fix: the token cannot read notifications" in out and "unknown for 1 run(s) in a row" in out
+    assert "the token cannot read notifications" in out and "notifications: 1 run(s) in a row" in out
 
 
 def test_forget_drops_an_item(watch, capsys):
@@ -394,3 +394,133 @@ def test_init_schedule_installs_the_scheduler(tmp_path, monkeypatch, capsys, pla
         assert calls == [] and "crontab -e" in out and "*/30 * * * *" in out
     assert cli.main(["init", "--schedule"]) == 0, "with a config already there, --schedule just schedules"
     assert cli.main(["init", "--schedule", "--force"]) == 2, "a new config needs --repos to schedule"
+
+
+# --- EBI round 3 ---------------------------------------------------------------------------------
+
+def test_json_alerts_carry_action_ts_and_a_version(watch):
+    watch("run1")
+    code, out, _ = watch("run2", "--json")
+    alerts = [json.loads(line) for line in out]
+    assert code == 0 and all(a["v"] == 1 and re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$", a["ts"]) for a in alerts)
+    flags = [a["action"] for a in alerts]
+    assert flags == sorted(flags, reverse=True), "everything that needs you comes first"
+    assert {a["kind"] for a in alerts if not a["action"]} == {"review"}
+
+
+def test_many_desktop_alerts_become_one_banner(watch, monkeypatch):
+    shown = []
+    monkeypatch.setattr(notify.subprocess, "run", lambda argv, **k: shown.append(argv))
+    monkeypatch.setattr(notify.shutil, "which", lambda t: "/usr/bin/notify-send" if t == "notify-send" else None)
+    watch("run1")
+    code, out, _ = watch("run2", "--notify", "notify-send")
+    assert code == 0 and len(out) == len(GOLDEN), "stdout still gets every alert"
+    assert len(shown) == 1 and "6 alerts, 5 need action" in shown[0][-2]
+    assert "ACCEPTED" in shown[0][-1] or "REOPENED" in shown[0][-1]
+    assert watch.state()["outbox"] == []
+
+
+def test_a_few_desktop_alerts_stay_separate(watch, monkeypatch):
+    shown = []
+    monkeypatch.setattr(notify.subprocess, "run", lambda argv, **k: shown.append(argv))
+    monkeypatch.setattr(notify, "BATCH", 10)
+    watch("run1")
+    watch("run2", "--notify", "notify-send")
+    assert len(shown) == len(GOLDEN)
+
+
+@pytest.mark.parametrize("platform,rc,expect", [("darwin", 0, "launchd, loaded"), ("darwin", 113, "NOT loaded"),
+                                                ("linux", 0, "systemd timer, active")])
+def test_status_reports_the_scheduler(tmp_path, monkeypatch, platform, rc, expect):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(schedule.sys, "platform", platform)
+    monkeypatch.setattr(schedule.shutil, "which", lambda t: "/bin/systemctl" if platform == "linux" else None)
+    (tmp_path / schedule.PLIST).parent.mkdir(parents=True)
+    (tmp_path / schedule.PLIST).write_text("<plist/>")
+
+    class R:
+        returncode, stdout = rc, "active\n"
+    assert expect in schedule.describe(run=lambda argv, **k: R())
+
+
+def test_ago():
+    assert cli.ago(100, now=130) == "30 s ago" and cli.ago(0, now=900) == "15 min ago"
+    assert cli.ago(0, now=3 * 3600) == "3 h ago" and cli.ago(0, now=3 * 86400) == "3 days ago"
+
+
+# --- review of 0.2.0 -------------------------------------------------------------------------------
+
+def test_a_command_backend_gets_every_alert_not_a_summary(watch, monkeypatch, tmp_path):
+    got = tmp_path / "got.jsonl"
+    monkeypatch.setenv("GH_UPSTREAM_WATCH_NOTIFY", f"sh -c 'cat >> {got}; echo >> {got}'")
+    watch("run1")
+    watch("run2", "--notify", "command")
+    kinds = [json.loads(line)["kind"] for line in got.read_text().splitlines() if line.strip()]
+    assert len(kinds) == len(GOLDEN) and "summary" not in kinds
+
+
+def test_a_failed_banner_retries_as_a_banner_not_a_burst(watch, monkeypatch):
+    shown = []
+
+    def flaky(argv, **k):
+        shown.append(argv)
+        raise notify.subprocess.CalledProcessError(1, argv)
+    monkeypatch.setattr(notify.subprocess, "run", flaky)
+    watch("run1")
+    watch("run2", "--notify", "notify-send")
+    assert len(shown) == 1, "one banner attempt, no fallback to six pop-ups"
+    assert all(e["pending"] == ["desktop"] for e in watch.state()["outbox"]) and len(watch.state()["outbox"]) == 6
+    shown.clear()
+    monkeypatch.setattr(notify.subprocess, "run", lambda argv, **k: shown.append(argv))
+    watch("run2", "--notify", "notify-send")
+    assert len(shown) == 1 and watch.state()["outbox"] == []
+
+
+def test_a_failing_destination_gets_five_runs(watch, monkeypatch):
+    monkeypatch.setenv("GH_UPSTREAM_WATCH_NOTIFY", "/no/such/notifier")
+    watch("run1")
+    sizes = []
+    for fixture in ("run2", "run2", "run2", "run2", "run2"):
+        watch(fixture, "--notify", "command")
+        sizes.append(len(watch.state()["outbox"]))
+    assert sizes == [6, 6, 6, 6, 0], sizes
+
+
+def test_alerts_left_by_an_older_version_get_the_v1_fields(watch, capsys):
+    watch("run1")
+    st = watch.state()
+    st["outbox"] = [{"alert": {"time": "2026-09-30 10:00", "kind": "gate", "key": "a/b#1", "title": "a/b#1 x",
+                               "message": "m", "url": ""}, "pending": ["stdout"]}]
+    watch.path.write_text(json.dumps(st))
+    _, out, _ = watch("run1", "--json")
+    old = json.loads(out[0])
+    assert old["v"] == 1 and old["action"] is True and old["ts"].startswith("2026-09-30T10:00:00")
+
+
+def test_status_counts_undelivered_and_slack_failures_as_problems(watch, capsys):
+    watch("run1")
+    st = watch.state()
+    st["outbox"] = [{"alert": {"title": "t"}, "pending": ["webhook"], "attempts": 1}]
+    st["slack"] = {"failures": 3, "last_error": "invalid_auth"}
+    watch.path.write_text(json.dumps(st))
+    cli.main(["status", "--state", str(watch.path), "--repos", "acme/widgets"])
+    out = capsys.readouterr().out
+    assert "problems: none" not in out and "undelivered" in out and "invalid_auth" in out
+
+
+def test_changes_requested_needs_you():
+    from gh_upstream_watch import core, packs
+    rules = packs.for_repo(packs.load(), "acme/widgets")
+    base = {"title": "t", "url": "https://github.com/acme/widgets/pull/1", "state": "open", "labels": [],
+            "assignees": [], "xrefs": [], "gates": {}, "human_comments": 0, "pr": True}
+    got = core.changes(dict(base, reviews=[]), dict(base, reviews=[[9, "maint", "CHANGES_REQUESTED"]]), "octocat", rules)
+    assert got == [("changes_requested", "CHANGES REQUESTED by @maint", None)] and "changes_requested" in core.ACTION_KINDS
+
+
+def test_status_does_not_push_cron_users_to_systemd(monkeypatch):
+    monkeypatch.setattr(schedule.sys, "platform", "linux")
+    monkeypatch.setattr(schedule.shutil, "which", lambda t: "/bin/systemctl")
+
+    class R:
+        returncode, stdout = 1, "inactive\n"
+    assert "crontab -l" in schedule.describe(run=lambda argv, **k: R())
