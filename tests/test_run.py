@@ -524,3 +524,14 @@ def test_status_does_not_push_cron_users_to_systemd(monkeypatch):
     class R:
         returncode, stdout = 1, "inactive\n"
     assert "crontab -l" in schedule.describe(run=lambda argv, **k: R())
+
+
+def test_the_quiet_run_really_sends_nothing(watch, monkeypatch, tmp_path):
+    """The printed absorb command must not reach a configured webhook either."""
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"repos": ["acme/widgets"], "webhook": "https://hooks.example/x"}))
+    sent = []
+    monkeypatch.setattr(notify, "send_one", lambda d, *a, **k: sent.append(d) or True)
+    watch("run1", "--config", str(cfg), "--webhook", "", "--notify", "none")
+    watch("run2", "--config", str(cfg), "--webhook", "", "--notify", "none")
+    assert "webhook" not in sent and "stdout" in sent

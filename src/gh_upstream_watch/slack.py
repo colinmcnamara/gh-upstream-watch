@@ -99,7 +99,9 @@ def check(cfg, st, now, runner=None):
         if not proven(item, user, cfg.get("channels") or []):
             continue
         key = f"{item['channel_id']}:{item['ts']}"
-        if key in seen:
+        # The single-file script keyed messages by channel name; a migrated state still knows them.
+        if key in seen or f"{item.get('channel')}:{item['ts']}" in seen:
+            seen.setdefault(key, float(item["ts"]))
             continue
         seen[key] = float(item["ts"])
         # The model ignores the time window sometimes, so it is enforced here.
