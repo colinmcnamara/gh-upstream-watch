@@ -6,6 +6,7 @@ so callers treat the thing they were checking as unknown for this run instead of
 import json
 import os
 import subprocess
+import time
 
 TIMEOUT = 60
 MAX_PAGES = 30  # 3,000 comments or timeline events per item; beyond that the item stays unknown
@@ -18,6 +19,14 @@ class GHError(Exception):
 
 class Incomplete(GHError):
     """GitHub answered, but not with everything (incomplete_results, result cap, page cap)."""
+
+
+class NotFound(GHError):
+    """404 or 410: deleted, transferred, or no longer visible to this token."""
+
+
+RATE_LIMITED = ("rate limit", "(HTTP 429)")
+RETRY_WAIT = 60  # search allows 30 requests a minute; one wait covers a burst
 
 
 def gh_binary():
@@ -40,7 +49,18 @@ def gh_get(path, params=None):
     argv = [gh_binary(), "api", "--method", "GET", path]
     for k, v in sorted((params or {}).items()):
         argv += ["-f", f"{k}={v}"]
-    out = _run(argv)
+    for attempt in range(3):
+        try:
+            out = _run(argv)
+            break
+        except GHError as e:
+            s = str(e)
+            if "(HTTP 404)" in s or "(HTTP 410)" in s:
+                raise NotFound(s)
+            if attempt == 2 or not any(r in s for r in RATE_LIMITED):
+                raise
+            # ponytail: fixed wait, not x-ratelimit-reset (gh api hides headers unless -i)
+            time.sleep(RETRY_WAIT)
     try:
         return json.loads(out)
     except ValueError:

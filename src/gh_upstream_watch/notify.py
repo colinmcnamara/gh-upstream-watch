@@ -1,5 +1,6 @@
 """Delivery. Each alert goes to stdout (text with the URL, or JSONL) and to each configured
 destination separately; a destination that fails is retried on the next run."""
+import html
 import json
 import os
 import re
@@ -17,7 +18,8 @@ OSASCRIPT = ["osascript", "-e", "on run argv", "-e", "display notification (item
 OPENABLE = re.compile(r"^https://(github\.com/|[\w-]+\.slack\.com/)")
 
 
-CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# C0/C1 controls, plus bidi and zero-width format characters that can reorder or hide what is shown.
+CONTROL = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,14 +55,15 @@ def webhook_ok(url):
 
 
 def desktop_argv(backend, alert):
-    title, msg, url = alert["title"], alert["message"], alert["url"]
+    title, msg, url = (CONTROL.sub(" ", alert[k]) for k in ("title", "message", "url"))
     if backend == "terminal-notifier":
         # terminal-notifier treats a message starting with [ ( { or a quote as an option; escape it.
         safe = "\\" + msg if msg[:1] in "[({\"'" else msg
         argv = ["terminal-notifier", "-title", "gh-upstream-watch", "-subtitle", title, "-message", safe]
         return argv + (["-open", url] if OPENABLE.match(url or "") else [])
     if backend == "notify-send":
-        return ["notify-send", "--app-name=gh-upstream-watch", "--", title, f"{msg}\n{url}"]
+        # Most notification daemons render the body as markup: escape it so a title cannot become a link.
+        return ["notify-send", "--app-name=gh-upstream-watch", "--", title, html.escape(f"{msg}\n{url}")]
     if backend == "osascript":
         # osascript cannot open a link on click, so the URL stays in the text you can see.
         return OSASCRIPT + [title, f"{msg} {url}"]

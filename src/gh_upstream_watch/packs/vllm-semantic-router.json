@@ -29,6 +29,7 @@
   },
   "claimable": {
     "search": "is:issue is:open in:title \"Workgroup Issues\"",
+    "authorized_by": {"associations": ["OWNER", "MEMBER", "COLLABORATOR"]},
     "title": "^\\[Community\\] Workgroup Issues",
     "comment_marker": "<!-- workgroup-operations:weekly-wg:{group} -->",
     "section": "### Available issues",

@@ -62,8 +62,11 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3):
-gh extension install colinmcnamara/gh-upstream-watch    # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.1.1   # then: gh upstream-watch --help
 ```
+
+`--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on
+the default branch. `python -m gh_upstream_watch` works too.
 
 ## Use
 
@@ -78,8 +81,15 @@ Each invocation is one pass. Schedule it; the tool prints a ready scheduler entr
 the interpreter and script you ran it with:
 
 ```sh
-gh-upstream-watch --print-plist   > ~/Library/LaunchAgents/local.gh-upstream-watch.plist   # macOS
-gh-upstream-watch --print-systemd                                                          # Linux
+# macOS: write the agent, then load it
+gh-upstream-watch --print-plist > ~/Library/LaunchAgents/local.gh-upstream-watch.plist
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.gh-upstream-watch.plist
+
+# Linux: save the two printed units under ~/.config/systemd/user/, then
+gh-upstream-watch --print-systemd
+systemctl --user daemon-reload && systemctl --user enable --now gh-upstream-watch.timer
+
+# cron (intervals 1-59 minutes): add the printed line with `crontab -e`
 gh-upstream-watch --print-cron
 ```
 
@@ -92,7 +102,11 @@ What one pass checks:
 - unread GitHub notifications that mention you, request your review, or assign you, in the watched
   repos (exact names; set `notification_repos` to `["*"]` for every repo, or to globs). This needs a
   token with the `notifications` scope: `gh auth refresh -s notifications` if they come back 403;
-- claim boards defined by a pack (a pinned issue that lists claimable tasks), for `claim_groups`.
+- claim boards defined by a pack (an issue that lists claimable tasks), for `claim_groups`. Only a
+  board opened by, and rows posted by, an author the pack's `claimable.authorized_by` trusts are read
+  (OWNER and COLLABORATOR by default), and a row's link must point into the watched repo;
+- an item that is deleted or no longer visible to you (404 or 410) alerts once as `GONE` and is
+  dropped from the watch list; it does not keep the run incomplete.
 
 Exit status: 0 when every check completed, 1 when something was unknown this run (logged as
 `unknown this run`; `gh` missing or signed out also lands here, with the fix printed), 2 for a
@@ -168,8 +182,9 @@ A gate matches only at the start of a comment (not a quoted line further down). 
 `COLLABORATOR` by default; `MEMBER` is not a default because an organization member can have
 read-only access. Author association alone cannot prove who may run a gate, so add the
 maintainers' logins to your copy of a pack when you know them. On first sight of an item, gates
-are checked too: an `/accept` already waiting alerts once. `then` is your own follow-up command; once you have posted it the alert drops the
-call to action. See `CONTRIBUTING.md` for the full schema and how to add a pack with a fixture.
+are checked too: an `/accept` already waiting alerts once. `then` is your own follow-up command; once
+you have posted it after the gate comment, the alert drops the call to action. `quiet_titles` apply
+only when the title was quiet before the change as well, so renaming an issue cannot silence it. See `CONTRIBUTING.md` for the full schema and how to add a pack with a fixture.
 
 For anything a pack cannot express, `--hook /abs/path` runs your program once per
 watched item that has a previous fingerprint (no shell, 30 s timeout) with `{"key", "repo", "number", "me", "old", "new"}` on
@@ -180,8 +195,12 @@ stdin; each stdout line `{"message": "...", "kind": "...", "url": "..."}` become
 - Full pagination for search, comments, reviews, timeline and notifications. A search over
   GitHub's 1,000-result cap is reported as unknown with a warning (no partitioning yet).
 - One failing item never loses the run; the state file is always saved.
-- The first run is silent, and the "seeded" flag is set only after a run in which every check
-  succeeded, so a half-failed first run cannot flood you later.
+- The first run is silent. Each source (a repo's search, an extra, notifications, a claim board)
+  seeds on its own first complete run, so one check that keeps failing never holds back the rest,
+  and an item with a saved baseline always alerts. `status` lists the sources still seeding.
+- New comments are found by comment id, not by count, so a deleted comment cannot hide a new one.
+- A new item whose first fetch fails is retried on later runs until it has a baseline.
+- Rate-limited calls wait 60 seconds and retry, at most twice.
 - State writes are atomic (temp file, fsync, rename) under an exclusive lock. A corrupt state file
   is moved aside and the next run re-seeds quietly.
 - Alerts are written to an outbox in the state file before delivery; a crash in between

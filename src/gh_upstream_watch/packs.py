@@ -45,6 +45,11 @@ def validate(pack, source):
     need(_strs(pack.get("repos")) and pack["repos"], "'repos' must be a non-empty list of strings (globs)")
     for key in ("gates", "label_transitions", "quiet_titles"):
         need(isinstance(pack.get(key, []), list), f"'{key}' must be a list")
+    def check_by(by, where):
+        need(isinstance(by, dict) and not set(by) - {"associations", "logins"}, f"{where}: authorized_by takes associations, logins")
+        need(_strs(by.get("logins", [])) and _strs(by.get("associations", [])), f"{where}: logins and associations must be string lists")
+        need(not set(by.get("associations", [])) - ASSOCIATIONS, f"{where}: unknown association in {by.get('associations')}")
+
     c = {"gates": [], "quiet_titles": [], "row": None}
     for g in pack.get("gates", []):
         need(isinstance(g, dict) and {"id", "comment", "authorized_by", "alert"} <= set(g),
@@ -52,10 +57,7 @@ def validate(pack, source):
         need(all(isinstance(g.get(k, ""), str) for k in ("id", "comment", "alert", "then", "alert_done")),
              f"gate {g['id']}: id, comment, alert, then, alert_done must be strings")
         need(g["comment"].startswith("^"), f"gate {g['id']}: comment regex must be anchored with ^")
-        by = g["authorized_by"]
-        need(isinstance(by, dict) and not set(by) - {"associations", "logins"}, f"gate {g['id']}: authorized_by takes associations, logins")
-        need(_strs(by.get("logins", [])) and _strs(by.get("associations", [])), f"gate {g['id']}: logins and associations must be string lists")
-        need(not set(by.get("associations", [])) - ASSOCIATIONS, f"gate {g['id']}: unknown association in {by.get('associations')}")
+        check_by(g["authorized_by"], f"gate {g['id']}")
         # No re.M: a gate matches only at the start of the comment body, never a quoted line further down.
         c["gates"].append((_regex(g["comment"], source), _regex(g["then"], source) if g.get("then") else None))
     for t in pack.get("label_transitions", []):
@@ -69,8 +71,10 @@ def validate(pack, source):
     need(not set(msgs) - MESSAGE_KEYS, f"unknown messages {sorted(set(msgs) - MESSAGE_KEYS)}")
     cl = pack.get("claimable")
     if cl:
-        need(isinstance(cl, dict) and set(cl) == CLAIMABLE_KEYS, f"claimable needs exactly {sorted(CLAIMABLE_KEYS)}")
-        need(all(isinstance(v, str) for v in cl.values()), "claimable values must be strings")
+        need(isinstance(cl, dict) and set(cl) - {"authorized_by"} == CLAIMABLE_KEYS,
+             f"claimable needs exactly {sorted(CLAIMABLE_KEYS)}, plus an optional authorized_by")
+        need(all(isinstance(v, str) for k, v in cl.items() if k != "authorized_by"), "claimable values must be strings")
+        check_by(cl.get("authorized_by", {}), "claimable")
         c["row"] = _regex(cl["row"], source, re.M)
         need({"number", "title", "url"} <= set(c["row"].groupindex), "claimable row needs groups number, title, url")
         c["claim_title"] = _regex(cl["title"], source)
@@ -112,7 +116,7 @@ def for_repo(packs, repo):
 def authorized(gate, login, association):
     """A gate that lists logins trusts only those logins. Otherwise only its associations count,
     OWNER and COLLABORATOR by default: author_association alone cannot prove who may run a gate."""
-    by = gate["authorized_by"]
+    by = gate.get("authorized_by") or {}
     if by.get("logins"):
         return login.lower() in {x.lower() for x in by["logins"]}
     assoc = by.get("associations")

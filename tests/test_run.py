@@ -129,13 +129,15 @@ def test_missing_gh_and_missing_repos_explain_the_next_step(tmp_path, monkeypatc
     assert cli.main(["--state", str(tmp_path / "s.json"), "--repos", "owner/repo"]) == 2
 
 
-def test_seeded_only_after_a_complete_run(watch):
+def test_each_source_seeds_on_its_own(watch):
+    """A failing source holds back only its own first-sight alerts; items with a baseline still alert."""
     notes = "notifications?page=1&participating=true&per_page=50&since=SINCE"
-    code, _, _ = watch("run1", responses={notes: {"__error__": "HTTP 500"}})
-    assert code == 1 and watch.state()["seeded"] is False
+    code, _, err = watch("run1", responses={notes: {"__error__": "HTTP 500"}})
+    assert code == 1 and watch.state()["seeded"] is False and "Still seeding: notifications" in err
     code, out, err = watch("run2")
-    assert (code, out) == (0, []) and "seed run" in err, "still the seed run: no flood from a half-seeded state"
-    assert watch.state()["seeded"] is True
+    asks = [line for line in GOLDEN if "requested your review" in line]
+    assert asks and out == [line for line in GOLDEN if line not in asks], "no flood from the late source, no loss elsewhere"
+    assert "seed run" in err and watch.state()["seeded"] is True
 
 
 def test_crash_between_outbox_write_and_notify_redelivers(watch, monkeypatch):
@@ -212,3 +214,102 @@ def test_gh_extension_shim_end_to_end(tmp_path):
         p = subprocess.run(args, env=env, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert [re.sub(r"^\[[^\]]+\] ", "", line) for line in p.stdout.splitlines()] == GOLDEN
+
+
+# --- red-team round 2 (v0.1.1) -----------------------------------------------------------------
+
+GONE = {"__error__": "gh: Not Found (HTTP 404)"}
+
+
+def test_a_deleted_item_alerts_once_and_the_run_stays_complete(watch):
+    watch("run1")
+    code, out, _ = watch("run1", responses={"repos/acme/widgets/issues/395": GONE})
+    assert code == 0 and [line for line in out if "GONE" in line] == [
+        "acme/widgets#395 [Community] Weekly sync thread: GONE: deleted, moved, or no longer visible to you "
+        "(https://github.com/acme/widgets/issues/395)"]
+    assert "acme/widgets#395" not in watch.state()["items"]
+    code, out, _ = watch("run1", responses={"repos/acme/widgets/issues/395": GONE})
+    assert (code, out) == (0, []), "said once; still complete, so pruning keeps running"
+
+
+def test_an_extra_that_does_not_exist_does_not_block_seeding(watch):
+    code, _, err = watch("run1", "--extra", "acme/widgets#99999")
+    assert code == 0 and "acme/widgets#99999: not found" in err and watch.state()["seeded"] is True
+
+
+def test_a_new_item_whose_first_fetch_fails_is_retried(watch):
+    code, _, _ = watch("run1", responses={"repos/acme/widgets/issues/388": {"__error__": "HTTP 502"}})
+    assert code == 1 and "acme/widgets#388" in watch.state()["retry"]
+    assert "acme/widgets#388" not in watch.state()["items"]
+    watch("run1")
+    assert watch.state()["retry"] == {} and "acme/widgets#388" in watch.state()["items"]
+
+
+@pytest.mark.parametrize("bad", ['{"schema": 1, "items": null}', '{"schema": 1, "items": {"a/b#1": []}}',
+                                 '{"schema": 1, "outbox": [1]}', '{"schema": 1, "outbox": [{}]}', '{"schema": "1"}', '{"schema": 1, "outbox": {}}',
+                                 '{"schema": 1, "notifications": {"seen": []}}'])
+def test_valid_json_in_the_wrong_shape_is_quarantined(watch, bad):
+    watch.path.write_text(bad)
+    code, _, err = watch("run1")
+    assert code == 0 and "re-seeding quietly" in err and watch.state()["seeded"] is True
+    assert list(watch.path.parent.glob("state.json.corrupt-*"))
+
+
+@pytest.mark.parametrize("cfg", [{"repos": "acme/widgets"}, {"repos": ["acme"]}, {"retention_days": "30"},
+                                 {"bots": [1]}, {"slack": True}, {"recent_closed_days": 0}, {"packs_dirs": "/x"}])
+def test_config_values_are_type_checked(tmp_path, capsys, cfg):
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps(dict({"repos": ["acme/widgets"]}, **cfg)))
+    assert cli.main(["--config", str(p), "--dry-run"]) == 2
+    err = capsys.readouterr().err
+    assert "is not a valid value" in err or "expected owner/repo" in err
+
+
+def test_print_helpers_bound_the_interval(capsys):
+    assert cli.main(["--print-cron", "--interval", "0"]) == 2
+    assert cli.main(["--print-cron", "--interval", "-1"]) == 2
+    assert cli.main(["--print-cron", "--interval", "90"]) == 2
+    assert cli.main(["--print-cron", "--interval", "59"]) == 2, "*/59 fires at :00 and :59, not every 59 minutes"
+    assert cli.main(["--print-cron", "--interval", "20"]) == 0
+    assert "*/20" in capsys.readouterr().out
+
+
+def gadgets(fake):
+    """A second repo with one issue where a maintainer already said /accept."""
+    r = "repos/acme/gadgets/issues/1"
+    fake.responses.update({
+        "search/issues?page=1&per_page=100&q=repo:acme/gadgets involves:octocat is:open":
+            {"total_count": 1, "incomplete_results": False, "items": [{"number": 1}]},
+        "search/issues?page=1&per_page=100&q=repo:acme/gadgets involves:octocat is:closed updated:>=DATE":
+            {"total_count": 0, "incomplete_results": False, "items": []},
+        r: {"title": "Old idea", "html_url": "https://github.com/acme/gadgets/issues/1", "state": "open",
+            "labels": [], "assignees": [], "comments": 1},
+        f"{r}/comments?page=1&per_page=100": [{"id": 1, "user": {"login": "maint"}, "body": "/accept",
+                                               "author_association": "OWNER"}],
+        f"{r}/timeline?page=1&per_page=100": []})
+
+
+def test_a_repo_added_to_upgraded_state_still_seeds(watch, fake):
+    watch("run1")
+    st = watch.state()
+    del st["seeded_sources"]  # what a 0.1.0 state file looks like
+    watch.path.write_text(json.dumps(st))
+    fake.load("run1")
+    gadgets(fake)
+    code, out, err = watch(None, "--repos", "acme/widgets", "acme/gadgets")
+    assert code == 0 and out == [] and "seed run" in err, "the new repo's old /accept does not alert"
+    assert "repo:acme/gadgets" in watch.state()["seeded_sources"] and watch.state()["seeded"] is True
+
+
+def test_a_404_on_part_of_an_item_is_unknown_not_gone(watch):
+    watch("run1")
+    code, out, _ = watch("run1", responses={"repos/acme/widgets/pulls/392": GONE})
+    assert code == 1 and not any("GONE" in line for line in out)
+    assert "acme/widgets#392" in watch.state()["items"]
+
+
+def test_plist_escapes_every_field(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path / "a&b"))
+    assert cli.main(["--print-plist"]) == 0
+    out = capsys.readouterr().out
+    assert "a&amp;b/Library/Logs" in out and "a&b/" not in out

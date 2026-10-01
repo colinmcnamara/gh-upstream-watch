@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.1.1] - 2026-09-30
+
+Fixes from a red-team review (Codex and Claude, with reproductions).
+
+- Claim boards: only a board opened by, and rows posted by, an author the pack trusts
+  (`claimable.authorized_by`, default OWNER and COLLABORATOR; the bundled vLLM Semantic Router pack
+  adds MEMBER) are read, and a row's link must point into the watched repo. Before, anyone could open
+  a newer issue with the board's title and send claim alerts.
+- Seeding is per source. One check that keeps failing (a typo'd extra, a token without the
+  notifications scope) no longer holds back every other alert, and an item with a saved baseline
+  always alerts.
+- A deleted or no-longer-visible item (404, 410) alerts once as `GONE` and is dropped, instead of
+  keeping every later run incomplete.
+- New comments are counted by id, so deleting a comment cannot hide a new one. Renaming an issue
+  to a quiet title no longer silences it. An edit that turns a known reference into `Closes #n`
+  raises the competing-PR alert. A `/assign` posted before the `/accept` no longer counts as done.
+- A deleted account (`user: null`) no longer makes an item unknown forever.
+- A new item whose first fetch fails is retried until it has a baseline.
+- Rate-limited calls wait and retry. A state file with the wrong shape is quarantined. Config value
+  types and `owner/repo` names are checked. `--print-cron` rejects intervals it cannot express; the
+  printed plist escapes paths.
+- Bidi and zero-width characters are stripped from alert text; `notify-send` bodies are escaped.
+- `python -m gh_upstream_watch` works. README: launchd, systemd and cron load steps; `--pin` for the
+  gh extension.
+- Upgrading from 0.1.0: each repo already in the state counts as seeded. One edge is not covered:
+  if 0.1.0 watched one issue of a repo as an extra and you now add that whole repo, its other items
+  are treated as seeded, so an `/accept` already waiting on one of them alerts once.
+- Release: every action pinned to a commit SHA; the tag must match both version sources and the
+  CHANGELOG section is checked before any upload.
+
 ## [0.1.0] - 2026-09-30
 
 First public release.

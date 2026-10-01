@@ -15,6 +15,7 @@ You are @octocat. Between the runs:
 Run: python3 tests/fixtures/make_demo.py
 """
 import json
+import re
 from pathlib import Path
 
 R = "acme/widgets"
@@ -36,6 +37,11 @@ def comment(login, body, assoc="NONE"):
 
 def pages(out, path, items, per_page=100):
     """Record every page a paginating client will ask for, including the short last page."""
+    # Comment ids from the issue number and position: stable across runs, growing like GitHub's.
+    m = re.search(r"issues/(\d+)/comments", path)
+    for idx, it in enumerate(items):
+        if m and isinstance(it, dict) and "id" not in it:
+            it["id"] = int(m.group(1)) * 1000 + idx + 1
     page = 1
     while True:
         chunk = items[(page - 1) * per_page: page * per_page]
