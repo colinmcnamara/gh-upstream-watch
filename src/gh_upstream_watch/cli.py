@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import string
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -14,7 +15,8 @@ from . import __version__, core, github, hooks, notify, packs, slack, state
 
 DEFAULTS = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
             "packs_dirs": [], "claim_groups": [], "recent_closed_days": 14, "retention_days": 30,
-            "baseline_days": 90, "notification_repos": None, "login": None, "bots": [], "slack": {"enabled": False}}
+            "baseline_days": 90, "notification_repos": None, "login": None, "bots": [], "slack": {"enabled": False},
+            "escalate_after_runs": 6}
 
 
 def config_dir():
@@ -34,9 +36,11 @@ def build_parser():
         prog="gh-upstream-watch",
         description="Read-only alerts for your upstream work: tells you the next action when a maintainer "
                     "gate, a competing PR, or a review moves. Every GitHub call is a GET.")
-    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "init", "migrate"],
+    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "init", "migrate", "forget", "explain"],
                     help="run (default): one pass; status: summarize the state file; init: write a starter "
-                         "config; migrate: convert a v0 state file (--from) into --state")
+                         "config; migrate: convert a v0 state file (--from) into --state; forget KEY...: drop "
+                         "items from the state; explain KEY: show what the tool sees for one item and why")
+    ap.add_argument("keys", nargs="*", metavar="OWNER/REPO#N", help="forget/explain: the items")
     ap.add_argument("--version", action="version", version=f"gh-upstream-watch {__version__}")
     ap.add_argument("--config", help="JSON config file (default: $XDG_CONFIG_HOME/gh-upstream-watch/config.json)")
     ap.add_argument("--state", help="state file (default: $XDG_STATE_HOME/gh-upstream-watch/state.json)")
@@ -57,6 +61,8 @@ def build_parser():
     ap.add_argument("--from", dest="from_path", help="migrate: the v0 state file to read")
     ap.add_argument("--claim-repo", default="unknown/unknown", help="migrate: repo of v0 claim-board rows")
     ap.add_argument("--force", action="store_true", help="init/migrate: overwrite an existing file")
+    ap.add_argument("--schedule", action="store_true", help="init: also install and load the scheduler "
+                    "(launchd on macOS, a systemd user timer on Linux)")
     ap.add_argument("--print-plist", action="store_true", help="print a launchd agent and exit")
     ap.add_argument("--print-systemd", action="store_true", help="print a systemd user service + timer and exit")
     ap.add_argument("--print-cron", action="store_true", help="print a crontab line and exit")
@@ -70,6 +76,22 @@ class ConfigError(Exception):
 
 PLACEHOLDER = "owner/repo"
 MAX_ATTEMPTS = 5  # a destination that keeps failing is dropped after this many runs
+
+
+def hint(err):
+    """The next step for an error a source keeps hitting, or '' when there is no better advice."""
+    s = str(err)
+    if "notifications" in s and ("403" in s or "404" in s):
+        return "the token cannot read notifications: run `gh auth refresh -s notifications`"
+    if "(HTTP 404)" in s or "not found" in s.lower():
+        return "not found: deleted, private to you, or a typo in repos/extras (`forget` drops it)"
+    if "rate limit" in s or "(HTTP 429)" in s:
+        return "rate limited: watch fewer repos, or schedule runs further apart"
+    if "exceed" in s and "cap" in s:
+        return "more than 1,000 search results: narrow repos"
+    if "auth login" in s or "(HTTP 401)" in s or "exited 4" in s:
+        return "gh is not signed in: run `gh auth login`"
+    return ""
 
 
 def gh_hint(err):
@@ -141,6 +163,22 @@ def require_repos(cfg):
                           "gh-upstream-watch init --repos OWNER/REPO, or pass --repos OWNER/REPO")
 
 
+def escalate(st, failed, errs, now, after):
+    """One alert when a source has been unknown for `after` runs in a row; the streak ends on success."""
+    streak = st.setdefault("unknown_streak", {})
+    for src in [s for s in streak if s not in failed]:
+        del streak[src]
+    out = []
+    for src in sorted(failed):
+        s = streak.setdefault(src, {"since": now, "runs": 0})
+        s["runs"] += 1
+        if s["runs"] == after:
+            since = time.strftime("%Y-%m-%d %H:%M", time.localtime(s["since"]))
+            out.append(alert(now, "stuck", src, f"gh-upstream-watch: {src} not checkable since {since}",
+                             hint(errs.get(src, "")) or errs.get(src, "")[:160], ""))
+    return out
+
+
 def alert(now, kind, key, title, message, url):
     return {"time": time.strftime("%Y-%m-%d %H:%M", time.localtime(now)), "kind": kind, "key": key,
             "title": title, "message": message, "url": url or ""}
@@ -178,12 +216,13 @@ def run(cfg, a, now=None):
             log(f"re-delivering {len(st['outbox'])} alert(s) from an earlier run")
             st["outbox"] = flush(st["outbox"])
             state.save(path, st)
-        complete, alerts, unknowns, failed = True, [], [], set()
+        complete, alerts, unknowns, failed, errs = True, [], [], set(), {}
 
         def unknown(what, e, source=None):
             nonlocal complete
             complete = False
             failed.add(source or what)
+            errs[source or what] = str(e)
             unknowns.append(f"{what}: {e}"[:300])
             log(f"{what}: unknown this run, nothing marked seen: {e}")
 
@@ -197,7 +236,11 @@ def run(cfg, a, now=None):
         except Exception as e:
             unknown("login", gh_hint(e))
             st["last_unknown"] = unknowns
+            stuck = escalate(st, failed, errs, now, cfg["escalate_after_runs"])
             if not a.dry_run:
+                st["outbox"] += [{"alert": al, "pending": list(dests)} for al in stuck]
+                state.save(path, st)
+                st["outbox"] = flush(st["outbox"])
                 state.save(path, st)
             return 1
 
@@ -316,9 +359,14 @@ def run(cfg, a, now=None):
         if complete:
             st["last_complete"] = now
             state.prune(st, now, cfg["retention_days"], live)
+        # Not seen by anyone if it only goes to a launchd log: one real alert per streak.
+        alerts += escalate(st, failed, errs, now, cfg["escalate_after_runs"])
         if a.dry_run:
             for al in alerts:
                 notify.send_one("stdout", al, as_json=a.json)
+            # What the seed run held back, so a first --dry-run shows what you will get.
+            for al in held:
+                notify.send_one("stdout", dict(al, title=f"(preview, not sent while seeding) {al['title']}"), as_json=a.json)
             return 0 if complete else 1
         # Written before delivery: a crash re-delivers instead of losing them, and a failed destination
         # stays pending for the next run.
@@ -362,6 +410,10 @@ def status(cfg):
           f"claim rows seen: {len(st['claimable']['seen'])}; outbox: {len(st['outbox'])}")
     for u in st.get("last_unknown") or []:
         print(f"unknown last run: {u}")
+        if hint(u):
+            print(f"  fix: {hint(u)}")
+    for src, s in sorted((st.get("unknown_streak") or {}).items()):
+        print(f"{src}: unknown for {s['runs']} run(s) in a row, since {time.strftime('%Y-%m-%d %H:%M', time.localtime(s['since']))}")
     if st["slack"]:
         print(f"slack: failures {st['slack'].get('failures', 0)}, last error {st['slack'].get('last_error')}")
     return 0
@@ -369,8 +421,12 @@ def status(cfg):
 
 def init(a):
     path = Path(a.config or config_dir() / "config.json")
+    if path.exists() and a.schedule and not a.force and not a.repos:
+        return install_schedule(a)  # config already there: just schedule it
     if path.exists() and not a.force:
         raise ConfigError(f"{path} exists; use --force to overwrite")
+    if a.schedule and not a.repos:
+        raise ConfigError("init --schedule needs --repos, so the scheduled runs have something to watch")
     starter = {"repos": a.repos or [PLACEHOLDER], "extras": [], "notify": "auto", "claim_groups": [],
                "slack": {"enabled": False}}
     try:
@@ -380,6 +436,55 @@ def init(a):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(starter, indent=2) + "\n")
     print(f"wrote {path}; {'edit repos, then ' if not a.repos else ''}run: gh-upstream-watch --dry-run")
+    return install_schedule(a) if a.schedule else 0
+
+
+def forget(cfg, a):
+    """Drop items (and their retry and claim-row entries) from the state, so they stop being watched
+    unless search finds them again, in which case they seed quietly."""
+    if not a.keys:
+        raise ConfigError("forget needs one or more OWNER/REPO#N")
+    with state.lock(cfg["state"]):
+        st = state.load(cfg["state"])
+        for key in a.keys:
+            hit = [st[s].pop(key, None) is not None for s in ("items", "retry", "unknown_streak") if s in st]
+            hit.append(st["claimable"]["seen"].pop(key, None) is not None)
+            print(f"{key}: {'forgotten' if any(hit) else 'not in the state'}")
+            if key in cfg["extras"]:
+                print(f"  note: {key} is still listed in extras ({cfg['_path']}); remove it there too")
+        state.save(cfg["state"], st)
+    return 0
+
+
+def explain(cfg, a):
+    """Read-only: the packs, the live fingerprint, the saved one, and what a run would alert, for one item."""
+    if len(a.keys) != 1 or a.keys[0].count("/") != 1 or not a.keys[0].partition("#")[2].isdigit():
+        raise ConfigError("explain needs exactly one OWNER/REPO#N")
+    key = a.keys[0]
+    repo, _, n = key.partition("#")
+    rules = packs.for_repo(packs.load([config_dir() / "packs", *cfg["packs_dirs"]]), repo)
+    me = cfg.get("login") or github.gh_get("user")["login"]
+    print(f"{key}: packs {', '.join(rules['ids'])}; you are @{me}")
+    print(f"  gates: {', '.join(g['id'] for g in rules['gates']) or 'none'}; quiet titles: "
+          f"{', '.join(r.pattern for r in rules['quiet_titles']) or 'none'}")
+    try:
+        fp = core.fingerprint(repo, int(n), me, rules, cfg["bots"])
+    except github.GHError as e:
+        print(f"  live: unknown ({e})" + (f"\n  fix: {hint(e)}" if hint(e) else ""))
+        return 1
+    saved = state.load(cfg["state"])["items"].get(key) if os.path.exists(cfg["state"]) else None
+    print(f"  live: {fp['state']}, {'PR' if fp['pr'] else 'issue'} \"{fp['title'][:60]}\", "
+          f"{fp['human_comments']} human comment(s), {fp['mentions_me']} naming you, "
+          f"gates {sorted(fp['gates']) or 'none'}, {len(fp['xrefs'])} reference(s)")
+    if saved is None:
+        print("  saved: none; a run would treat it as new (first sight: only gates alert, then it seeds)")
+    else:
+        print(f"  saved: last checked {time.strftime('%Y-%m-%d %H:%M', time.localtime(saved.get('_seen', 0)))}")
+    found = core.changes(saved, fp, me, rules)
+    for kind, msg, _ in found:
+        print(f"  would alert: [{kind}] {msg}")
+    if not found:
+        print("  would alert: nothing")
     return 0
 
 
@@ -416,7 +521,8 @@ def minimal_path():
     return ":".join(dirs + [d for d in ("/usr/local/bin", "/usr/bin", "/bin") if d not in dirs])
 
 
-def printers(a):
+def render(a):
+    """The scheduler files, as text: plist, service, timer, cron."""
     exe = os.path.realpath(sys.argv[0])
     prog = [sys.executable, exe] if os.path.basename(exe) == "gh-upstream-watch" else [sys.executable, "-m", "gh_upstream_watch.cli"]
     if a.config:
@@ -425,16 +531,52 @@ def printers(a):
     fields = {"program": " ".join(prog), "interval_seconds": a.interval * 60, "interval_minutes": a.interval,
               "path": minimal_path(), "home": str(Path.home()),
               "program_args": "\n".join(f"    <string>{xml_escape(p)}</string>" for p in prog)}
+    esc = {k: xml_escape(str(v)) for k, v in fields.items() if k != "program_args"}
+    return {"plist": template("launchd.plist.template").substitute(fields, **esc),
+            "service": template("systemd/gh-upstream-watch.service").substitute(fields),
+            "timer": template("systemd/gh-upstream-watch.timer").substitute(fields),
+            "cron": template("cron.txt").substitute(fields)}
+
+
+def printers(a):
+    r = render(a)
     if a.print_plist:
-        esc = {k: xml_escape(str(v)) for k, v in fields.items() if k != "program_args"}
-        print(template("launchd.plist.template").substitute(fields, **esc), end="")
+        print(r["plist"], end="")
     if a.print_systemd:
         print("# ~/.config/systemd/user/gh-upstream-watch.service")
-        print(template("systemd/gh-upstream-watch.service").substitute(fields))
+        print(r["service"])
         print("# ~/.config/systemd/user/gh-upstream-watch.timer")
-        print(template("systemd/gh-upstream-watch.timer").substitute(fields), end="")
+        print(r["timer"], end="")
     if a.print_cron:
-        print(template("cron.txt").substitute(fields), end="")
+        print(r["cron"], end="")
+    return 0
+
+
+PLIST = "Library/LaunchAgents/local.gh-upstream-watch.plist"
+
+
+def install_schedule(a, run=subprocess.run):
+    """Write and load the scheduler for this machine: launchd on macOS, a systemd user timer where
+    systemctl exists, otherwise print the cron line to add by hand."""
+    r = render(a)
+    if sys.platform == "darwin":
+        p = Path.home() / PLIST
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(r["plist"])
+        domain = f"gui/{os.getuid()}"
+        run(["launchctl", "bootout", domain, str(p)], capture_output=True)  # an older copy, if loaded
+        run(["launchctl", "bootstrap", domain, str(p)], check=True, capture_output=True)
+        print(f"scheduled every {a.interval} min: {p} (loaded; logs in ~/Library/Logs/gh-upstream-watch.log)")
+    elif shutil.which("systemctl"):
+        d = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "systemd" / "user"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "gh-upstream-watch.service").write_text(r["service"])
+        (d / "gh-upstream-watch.timer").write_text(r["timer"])
+        run(["systemctl", "--user", "daemon-reload"], check=True, capture_output=True)
+        run(["systemctl", "--user", "enable", "--now", "gh-upstream-watch.timer"], check=True, capture_output=True)
+        print(f"scheduled every {a.interval} min: {d}/gh-upstream-watch.timer (enabled; logs: journalctl --user -u gh-upstream-watch)")
+    else:
+        print("no launchd or systemd here; add this line with `crontab -e`:\n" + r["cron"], end="")
     return 0
 
 
@@ -453,6 +595,10 @@ def main(argv=None):
             return status(cfg)
         if a.command == "migrate":
             return migrate(cfg, a)
+        if a.command == "forget":
+            return forget(cfg, a)
+        if a.command == "explain":
+            return explain(cfg, a)
         return run(cfg, a)
     except state.Locked as e:
         log(f"skipped: {e}")

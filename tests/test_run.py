@@ -313,3 +313,84 @@ def test_plist_escapes_every_field(tmp_path, monkeypatch, capsys):
     assert cli.main(["--print-plist"]) == 0
     out = capsys.readouterr().out
     assert "a&amp;b/Library/Logs" in out and "a&b/" not in out
+
+
+# --- EBI round 1 ---------------------------------------------------------------------------------
+
+def test_dry_run_on_a_new_install_previews_what_it_holds_back(watch):
+    code, out, err = watch("run1", "--dry-run")
+    assert code == 0 and "seed run" in err
+    assert out and all(line.startswith("(preview, not sent while seeding) ") for line in out)
+    assert not watch.path.exists(), "dry-run saves nothing"
+
+
+def test_a_source_unknown_for_n_runs_escalates_once(watch):
+    notes = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+    bad = {notes: {"__error__": "gh: Not Found (HTTP 404) notifications"}}
+    watch("run1")
+    outs = [watch("run1", responses=bad)[1] for _ in range(7)]
+    stuck = [(i, line) for i, out in enumerate(outs) for line in out if "not checkable" in line]
+    assert len(stuck) == 1 and stuck[0][0] == 5, "the 6th failing run in a row, once"
+    assert "gh auth refresh -s notifications" in stuck[0][1]
+    watch("run1")
+    assert "notifications" not in watch.state()["unknown_streak"], "recovery ends the streak"
+
+
+def test_escalation_while_gh_is_signed_out(watch, fake, monkeypatch):
+    def signed_out(argv):
+        raise cli.github.GHError("user: gh exited 4: To get started with GitHub CLI, please run:  gh auth login")
+    monkeypatch.setattr(cli.github, "_run", signed_out)
+    outs = [watch(None) for _ in range(7)]
+    stuck = [line for _, out, _ in outs for line in out if "not checkable" in line]
+    assert len(stuck) == 1 and "gh auth login" in stuck[0]
+
+
+def test_status_prints_the_fix(watch, capsys):
+    watch("run1", "--extra", "acme/widgets#390",
+          responses={"notifications?page=1&participating=true&per_page=50&since=SINCE":
+                     {"__error__": "gh: Not Found (HTTP 404) notifications"}})
+    cli.main(["status", "--state", str(watch.path), "--repos", "acme/widgets"])
+    out = capsys.readouterr().out
+    assert "fix: the token cannot read notifications" in out and "unknown for 1 run(s) in a row" in out
+
+
+def test_forget_drops_an_item(watch, capsys):
+    watch("run1")
+    assert cli.main(["forget", "acme/widgets#390", "acme/widgets#1", "--state", str(watch.path),
+                     "--repos", "acme/widgets"]) == 0
+    out = capsys.readouterr().out
+    assert "acme/widgets#390: forgotten" in out and "acme/widgets#1: not in the state" in out
+    assert "acme/widgets#390" not in watch.state()["items"]
+    assert cli.main(["forget", "--state", str(watch.path), "--repos", "acme/widgets"]) == 2
+
+
+def test_explain_shows_what_a_run_would_alert(watch, fake, capsys):
+    watch("run1")
+    fake.load("run2")
+    assert cli.main(["explain", "acme/widgets#390", "--state", str(watch.path), "--repos", "acme/widgets",
+                     "--packs-dir", str(FIXTURES / "packs")]) == 0
+    out = capsys.readouterr().out
+    assert "packs generic, acme" in out and "would alert: [gate] ACCEPTED by @maint: comment /assign now" in out
+    assert cli.main(["explain", "nonsense", "--repos", "acme/widgets"]) == 2
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux", "other"])
+def test_init_schedule_installs_the_scheduler(tmp_path, monkeypatch, capsys, platform):
+    calls = []
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(cli.sys, "platform", platform)
+    monkeypatch.setattr(cli.shutil, "which", lambda t: "/bin/systemctl" if platform == "linux" and t == "systemctl" else None)
+    monkeypatch.setattr(cli, "install_schedule", lambda a, run=None, _real=cli.install_schedule: _real(a, run=lambda argv, **k: calls.append(argv)))
+    assert cli.main(["init", "--repos", "acme/widgets", "--login", "octocat", "--schedule"]) == 0
+    out = capsys.readouterr().out
+    if platform == "darwin":
+        plist = tmp_path / cli.PLIST
+        assert plist.exists() and "<string>--once</string>" in plist.read_text()
+        assert calls[-1][:2] == ["launchctl", "bootstrap"] and calls[-1][3] == str(plist)
+    elif platform == "linux":
+        d = tmp_path / "config" / "systemd" / "user"
+        assert (d / "gh-upstream-watch.timer").exists() and calls[-1][-1] == "gh-upstream-watch.timer"
+    else:
+        assert calls == [] and "crontab -e" in out and "*/30 * * * *" in out
+    assert cli.main(["init", "--schedule"]) == 0, "with a config already there, --schedule just schedules"
+    assert cli.main(["init", "--schedule", "--force"]) == 2, "a new config needs --repos to schedule"

@@ -14,8 +14,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.10.12"
       - name: Tag must match both version sources, and CHANGELOG must have notes (before any upload)
@@ -42,7 +42,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.10.12"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -50,6 +50,15 @@ jobs:
           name: dist
           path: dist/
       - run: uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/ dist/*.whl dist/*.tar.gz
+      - name: Install from TestPyPI and run it before PyPI gets anything
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          for i in $(seq 1 18); do  # TestPyPI's index can lag the upload by a minute or two
+            uvx --no-cache --default-index https://test.pypi.org/simple/ --from "gh-upstream-watch==$v" \
+              gh-upstream-watch --version | grep -qx "gh-upstream-watch $v" && exit 0
+            sleep 10
+          done
+          echo "gh-upstream-watch $v did not install from TestPyPI"; exit 1
 
   pypi:
     needs: testpypi
@@ -58,7 +67,7 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: "0.10.12"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -73,7 +82,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: dist
