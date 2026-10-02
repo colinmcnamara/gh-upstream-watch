@@ -54,12 +54,16 @@ def webhook_ok(url):
     return bool(u.hostname) and (u.scheme == "https" or (u.scheme == "http" and u.hostname in ("localhost", "127.0.0.1", "::1")))
 
 
+def tn_safe(value):
+    """terminal-notifier reads a value starting with [ ( { or a quote as something else and fails;
+    a leading backslash makes it literal (and is not shown)."""
+    return "\\" + value if value[:1] in "[({\"'" else value
+
+
 def desktop_argv(backend, alert):
     title, msg, url = (CONTROL.sub(" ", alert[k]) for k in ("title", "message", "url"))
     if backend == "terminal-notifier":
-        # terminal-notifier treats a message starting with [ ( { or a quote as an option; escape it.
-        safe = "\\" + msg if msg[:1] in "[({\"'" else msg
-        argv = ["terminal-notifier", "-title", "gh-upstream-watch", "-subtitle", title, "-message", safe]
+        argv = ["terminal-notifier", "-title", "gh-upstream-watch", "-subtitle", tn_safe(title), "-message", tn_safe(msg)]
         return argv + (["-open", url] if OPENABLE.match(url or "") else [])
     if backend == "notify-send":
         # Most notification daemons render the body as markup: escape it so a title cannot become a link.

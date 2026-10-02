@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.2] - 2026-10-02
+
+Two bugs seen on a live watcher.
+
+- Slack: the check asks Claude Code for structured output (`--json-schema`), so the answer is an
+  object with an `items` array and never prose. Before, a model that wrapped its array in prose, or
+  answered in prose only, made the Slack source unknown for that run (twice in about 30 hours). If
+  `claude` does not support `--json-schema`, the check falls back to the text answer, which may now
+  hold its array in exactly one ```json fence inside prose. Prose with no array is still a failure,
+  and every item still needs its proof.
+- terminal-notifier: the subtitle (the alert title) is escaped like the message when it starts with
+  `[`, `(`, `{` or a quote. Unescaped, terminal-notifier exits 0 and shows nothing, so the pop-up was
+  lost silently.
+
 ## [0.2.1] - 2026-10-01
 
 Fixes from migrating a real watcher off the single-file script.

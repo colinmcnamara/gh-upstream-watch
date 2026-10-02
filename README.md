@@ -277,7 +277,9 @@ this before enabling it:
   tools allowed, no user or project settings, an empty temporary working directory, and a minimal
   environment (no `GH_TOKEN`). That call costs money or plan usage; `every_minutes` (default 25)
   throttles it.
-- Model output is untrusted. The answer must be exactly a JSON array. Each item must carry a
+- Model output is untrusted. The check asks for structured output (`claude -p --json-schema`), an
+  object whose `items` array holds the messages; with an older `claude` the text answer must be a JSON
+  array, bare or in one ```json fence. Each item must carry a
   Slack channel id, a message ts and the text, plus proof: the raw `<@you>` tag for a mention, or
   the ts of your own message for a thread reply. Items without proof, outside `channels` (when
   set), or older than `days` are dropped. Be clear about what that proves: the proof fields are
