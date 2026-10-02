@@ -27,6 +27,15 @@ ENV_KEEP = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "SHEL
 SLACK_LINK = re.compile(r"^https://[\w-]+\.slack\.com/")
 CHANNEL_RE = re.compile(r"^[CDG][A-Z0-9]{2,}$")
 TS_RE = re.compile(r"^\d{9,}\.\d+$")
+_STR = {"type": "string"}
+# Structured output (`claude -p --json-schema`): the answer is this object, never prose. The schema
+# shapes the answer; it proves nothing, so every item still goes through proven().
+SCHEMA = {"type": "object", "required": ["items"], "properties": {"items": {"type": "array", "items": {
+    "type": "object", "required": ["channel_id", "ts", "kind", "text"],
+    "properties": {"channel": _STR, "channel_id": _STR, "ts": _STR, "author": _STR,
+                   "kind": {"type": "string", "enum": ["mention", "thread_reply"]},
+                   "your_ts": _STR, "evidence": _STR, "text": _STR, "link": _STR}}}}}
+FENCE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.S)
 
 
 class SlackError(Exception):
@@ -34,20 +43,30 @@ class SlackError(Exception):
 
 
 def parse(stdout):
-    """The item list from `claude -p --output-format json`, or SlackError. One optional code fence
-    around the array is tolerated; anything else that is not exactly a JSON array is a failure."""
+    """The item list from `claude -p --output-format json`, or SlackError.
+
+    Structured output ({"items": [...]}) is used when present. Otherwise the text answer must be a
+    JSON array: bare, or in exactly one ```json fence (with or without prose around it). Prose with
+    no array, or more than one fence, is a failure."""
     try:
-        result = json.loads(stdout)["result"]
+        env = json.loads(stdout)
+        result = env["result"]
     except (ValueError, KeyError, TypeError):
         raise SlackError("claude did not return its JSON envelope")
-    if not isinstance(result, str):
-        raise SlackError(f"claude envelope has no text result ({type(result).__name__})")
-    body = result.strip()
-    fence = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", body, re.S)
-    try:
-        items = json.loads(fence.group(1) if fence else body)
-    except ValueError:
-        raise SlackError(f"answer is not a JSON array: {' '.join(body.split())[:160]}")
+    structured = env.get("structured_output")
+    if isinstance(structured, dict) and isinstance(structured.get("items"), list):
+        items = structured["items"]
+    else:
+        if not isinstance(result, str):
+            raise SlackError(f"claude envelope has no text result ({type(result).__name__})")
+        body = result.strip()
+        fences = FENCE.findall(body)
+        try:
+            items = json.loads(fences[0] if len(fences) == 1 else body)
+        except ValueError:
+            raise SlackError(f"answer is not a JSON array: {' '.join(body.split())[:160]}")
+        if isinstance(items, dict) and isinstance(items.get("items"), list):
+            items = items["items"]  # the schema's object shape, returned as text
     if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
         raise SlackError("answer is not a JSON array of objects")
     return items
@@ -83,10 +102,15 @@ def check(cfg, st, now, runner=None):
         raise SlackError("claude (Claude Code) not found; set slack.claude")
     argv = [claude, "-p", query.format(user=user, days=days), "--model", cfg.get("model", "haiku"),
             "--output-format", "json", "--max-turns", "20", *ISOLATION]
-    try:
+
+    def call(extra):
         with tempfile.TemporaryDirectory(prefix="ghuw-slack-") as cwd:
-            proc = (runner or subprocess.run)(argv, capture_output=True, text=True, timeout=cfg.get("timeout", 600),
-                                              cwd=cwd, env=minimal_env())
+            return (runner or subprocess.run)(argv + extra, capture_output=True, text=True,
+                                              timeout=cfg.get("timeout", 600), cwd=cwd, env=minimal_env())
+    try:
+        proc = call(["--json-schema", json.dumps(SCHEMA)])
+        if proc.returncode != 0 and "json-schema" in (proc.stderr or ""):
+            proc = call([])  # a Claude Code without --json-schema: the text answer is parsed instead
     except (OSError, subprocess.SubprocessError) as e:
         raise SlackError(str(e))
     if proc.returncode != 0:
