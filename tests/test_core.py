@@ -197,7 +197,8 @@ def test_notifications_alert_once_per_update(fake):
     fake.responses[key] = [notification("1", "mention", "t1"), notification("2", "subscribed", "t1")]
     seen, live = {}, set()
     first = core.notification_asks(seen, 30, 1.7e9, live)
-    assert [(a["title"], a["url"]) for a in first] == [("acme/widgets: someone mentioned you", "https://github.com/acme/widgets/issues/5")]
+    assert [(a["key"], a["title"], a["message"], a["url"]) for a in first] == [
+        ("acme/widgets#5", "acme/widgets#5 Fix x", "someone mentioned you", "https://github.com/acme/widgets/issues/5")]
     assert live == {"1", "2"}
     assert core.notification_asks(seen, 30, 1.7e9, set()) == [], "the same update alerts once"
     fake.responses[key][0]["updated_at"] = "t2"

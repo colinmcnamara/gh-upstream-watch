@@ -155,6 +155,26 @@ def require_repos(cfg):
                           "gh-upstream-watch init --repos OWNER/REPO, or pass --repos OWNER/REPO")
 
 
+def fold(alerts):
+    """One alert per item per run: a notification about an item that also alerts this run joins that
+    alert (who asked first, then what changed) instead of arriving as a second line. Runs on what is
+    being sent, after seeding, so a notification is never held back with a first-sight alert."""
+    host = {}
+    for al in alerts:
+        if al["kind"] != "notification":
+            host.setdefault(al["key"], al)
+    out = []
+    for al in alerts:
+        h = host.get(al["key"]) if al["kind"] == "notification" else None
+        if h is None:
+            out.append(al)
+            continue
+        h["message"] = f"{al['message']}; {h['message']}"
+        if not h["action"]:  # the ask is what needs you: label the line, and link, as the ask
+            h.update(kind=al["kind"], action=al["action"], url=al["url"] or h["url"])
+    return out
+
+
 def escalate(st, failed, errs, now, after):
     """One alert when a source has been unknown for `after` runs in a row; the streak ends on success."""
     streak = st.setdefault("unknown_streak", {})
@@ -328,7 +348,8 @@ def run(cfg, a, now=None):
         seen, live = dict(st["notifications"]["seen"]), set()
         try:
             alerts += [("notifications", alert(now, **x))
-                       for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos)]
+                       for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos, me,
+                                                       lambda r: packs.for_repo(rule_packs, r)["quiet_titles"])]
             st["notifications"]["seen"] = seen
         except Exception as e:
             unknown("notifications", e)
@@ -362,6 +383,7 @@ def run(cfg, a, now=None):
         sources = ({f"repo:{r}" for r in cfg["repos"]} | {f"extra:{e}" for e in cfg["extras"]} | {"notifications"}
                    | {f"claim:{r}" for r in cfg["repos"] if packs.for_repo(rule_packs, r)["claimable"] and cfg["claim_groups"]})
         alerts, held, newly = state.hold_until_seeded(st, alerts, sources, failed, old, cfg["extras"])
+        alerts = fold(alerts)
         if newly:
             log(f"seed run: watching {len(items)} item(s); {len(held)} alert(s) suppressed. "
                 + ("All sources seeded; alerts start next run." if st["seeded"] else

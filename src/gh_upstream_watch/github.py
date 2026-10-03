@@ -26,6 +26,9 @@ class NotFound(GHError):
 
 
 RATE_LIMITED = ("rate limit", "(HTTP 429)")
+# A network blip, not an answer: one quick retry before the item is called unknown for this run.
+TRANSIENT = ('Get "http', "i/o timeout", "context deadline exceeded", "TLS handshake timeout", "connection reset",
+             "unexpected EOF", "timed out after", "(HTTP 502)", "(HTTP 503)", "(HTTP 504)")
 RETRY_WAIT = 60  # search allows 30 requests a minute; one wait covers a burst
 
 
@@ -57,10 +60,13 @@ def gh_get(path, params=None):
             s = str(e)
             if "(HTTP 404)" in s or "(HTTP 410)" in s:
                 raise NotFound(s)
-            if attempt == 2 or not any(r in s for r in RATE_LIMITED):
+            if attempt < 2 and any(r in s for r in RATE_LIMITED):
+                # ponytail: fixed wait, not x-ratelimit-reset (gh api hides headers unless -i)
+                time.sleep(RETRY_WAIT)
+            elif attempt == 0 and any(t in s for t in TRANSIENT):
+                time.sleep(2)
+            else:
                 raise
-            # ponytail: fixed wait, not x-ratelimit-reset (gh api hides headers unless -i)
-            time.sleep(RETRY_WAIT)
     try:
         return json.loads(out)
     except ValueError:

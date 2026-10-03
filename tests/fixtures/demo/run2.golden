@@ -2,5 +2,5 @@ acme/widgets#388 Document the retry flag: REOPENED: claim it (https://github.com
 acme/widgets#390 Widget spins forever on an empty config: ACCEPTED by @maint: comment /assign now (https://github.com/acme/widgets/issues/390)
 acme/widgets#390 Widget spins forever on an empty config: COMPETING PR #401 (by @monalisa) says Closes #390: check scope before /assign (https://github.com/acme/widgets/pull/401)
 acme/widgets#395 [Community] Weekly sync thread: 1 comment naming you (https://github.com/acme/widgets/issues/395)
-acme/widgets: someone requested your review: Tighten lint config (https://github.com/acme/widgets/pull/14)
+acme/widgets#14 Tighten lint config: someone requested your review (https://github.com/acme/widgets/pull/14)
 acme/widgets#392 Add retry backoff: APPROVED by @maint (https://github.com/acme/widgets/pull/392)

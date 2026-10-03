@@ -55,7 +55,7 @@ $ gh-upstream-watch --repos acme/widgets --packs-dir tests/fixtures/packs --noti
 [2026-09-30 08:24] acme/widgets#390 Widget spins forever on an empty config: ACCEPTED by @maint: comment /assign now (https://github.com/acme/widgets/issues/390)
 [2026-09-30 08:24] acme/widgets#390 Widget spins forever on an empty config: COMPETING PR #401 (by @monalisa) says Closes #390: check scope before /assign (https://github.com/acme/widgets/pull/401)
 [2026-09-30 08:24] acme/widgets#395 [Community] Weekly sync thread: 1 comment naming you (https://github.com/acme/widgets/issues/395)
-[2026-09-30 08:24] acme/widgets: someone requested your review: Tighten lint config (https://github.com/acme/widgets/pull/14)
+[2026-09-30 08:24] acme/widgets#14 Tighten lint config: someone requested your review (https://github.com/acme/widgets/pull/14)
 [2026-09-30 08:24] acme/widgets#392 Add retry backoff: APPROVED by @maint (https://github.com/acme/widgets/pull/392)
 ```
 
@@ -167,6 +167,14 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
 `state: null` keeps the state file at `$XDG_STATE_HOME/gh-upstream-watch/state.json`
 (default `~/.local/state/...`); it is written mode 0600.
 
+A mention says who and what (`@maint mentioned you: "can you rebase on main?"`) and links to the
+comment. On a quiet-title thread (a megathread), a mention alerts only when a comment really names
+you: GitHub keeps calling every later post in a thread you were once named in a "mention". A
+notification about an item that also changed this run joins that item's line instead of adding a
+second one. "Referenced by" alerts stop on quiet threads and on items closed more than 7 days ago; a
+PR that says it closes your item always alerts. A network blip gets one quick retry before an item
+counts as unknown.
+
 Notifications: stdout always (text with the URL, or `--json` for JSON lines). When more than three
 alerts arrive in one run, the desktop gets one banner ("6 alerts, 5 need action: ...") instead of
 six; stdout and the webhook still get every alert. `notify: auto` uses
@@ -189,7 +197,7 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 | `v` | shape version, `1` |
 | `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `review`, `changes_requested`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
 | `action` | `true` when it needs you to do something (gates, competing PRs, reopens, requested changes, assignments, asks, claims, escalations) |
-| `key` | `owner/repo#n`, `owner/repo` for notifications, the source for `stuck` |
+| `key` | `owner/repo#n` (a notification about a repo rather than an item: `owner/repo`), the source for `stuck` |
 | `title`, `message` | the human text; the text line is `title: message (url)` |
 | `url` | a `https://github.com/` or `https://*.slack.com/` link, or empty |
 | `ts` | ISO 8601 with the UTC offset, for machines |
