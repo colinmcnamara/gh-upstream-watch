@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.3] - 2026-10-03
+
+Resonance: fewer, better alerts, from two days of real use. Replaying the same live data, 0.2.2
+raised 40 alerts and 0.2.3 raises 3.
+
+- Mentions say who and what: `@maint mentioned you: "can you rebase on main?"`, linking to the
+  comment. GitHub often gives no latest comment, so the thread's recent comments are searched.
+- Quiet-title threads stay quiet for notifications too: GitHub calls every later post in a thread you
+  were once named in a "mention", so a megathread alerts only when a comment really names you.
+- One line per item per run: a notification about an item that also changed joins that item's
+  alert. A notification's `key` is now `owner/repo#n`.
+- No "referenced by" on quiet threads or on items closed more than 7 days ago. A PR that says it
+  closes your item still always alerts.
+- A network blip (connection reset, timeout, HTTP 502/503/504) gets one quick retry before the item
+  is unknown for the run.
+
 ## [0.2.2] - 2026-10-02
 
 Two bugs seen on a live watcher.
