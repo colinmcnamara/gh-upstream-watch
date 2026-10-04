@@ -69,8 +69,21 @@ from the network, email. A pack for another project's command workflow is a welc
 
 ## Releasing (maintainers)
 
-Bump the version in both `pyproject.toml` and `__version__` (a test checks they match) and `CHANGELOG.md`, tag `vX.Y.Z`, push the tag. `release.yml` builds, publishes
-with `uv publish` to TestPyPI then PyPI by trusted publishing, and creates the GitHub Release.
+1. On a branch: bump the version in both `pyproject.toml` and `__version__` (a test checks they
+   match), and add a dated `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`. Date it before the
+   PR, so the merge needs no extra commit.
+2. Open the PR. `main` requires a PR and the five CI checks (`hygiene` and the four `test (...)`
+   jobs), squash only. `gh pr merge N --squash --auto` merges when they pass.
+3. Tag the merged commit `vX.Y.Z` and push the tag. The `release tags` ruleset protects `v*`; the
+   push may print "creations being restricted" while it applies the maintainer bypass, and the
+   tag is still created.
+4. `release.yml` checks that the tag matches both version sources and the CHANGELOG, builds once,
+   publishes to TestPyPI by trusted publishing, and installs and runs it from there. Then the
+   `pypi` job waits for a maintainer to approve the `pypi` environment (in the run's page, or
+   through the REST API's pending-deployments endpoint). Configure PyPI's trusted publisher with
+   environment `pypi` (and TestPyPI's with `testpypi`), so no other job can publish. After approval it publishes to PyPI and creates the
+   GitHub Release from the CHANGELOG section.
+5. A failed release never moves a tag: fix forward with the next patch version.
 
 ## Worked example: a Kubernetes (prow) pack
 

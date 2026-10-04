@@ -11,7 +11,7 @@ KEEP_IDS = 200
 SETTLED_DAYS = 7  # ponytail: fixed; "referenced by" on an item closed longer than this is dropped
 # Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
 ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
-                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict"}
+                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict", "approval"}
 
 
 def plural(n, word):
@@ -438,6 +438,32 @@ def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, qu
         message = (f"@{named[0]}{also} {verb}: \"{around(visible(named[1].get('body')), me)}\"" if named else f"someone {verb}")
         fresh.append({"kind": "notification", "key": key, "title": f"{key} {title[:50]}", "message": message,
                       "url": github.html_url((named[1].get("html_url") if named else "") or "") or url})
+    return fresh
+
+
+def approval_asks(seen, repo, now, live):
+    """Workflow runs in repo waiting on an environment you can approve (a protected `pypi`, say), once
+    per run. A run you cannot approve is checked again next time, not marked seen."""
+    reply = github.gh_get(f"repos/{repo}/actions/runs", {"status": "waiting", "per_page": 20})
+    runs = reply.get("workflow_runs") or []
+    if (reply.get("total_count") or 0) > len(runs):
+        raise github.Incomplete(f"{repo}: {reply['total_count']} runs waiting, read {len(runs)}")
+    fresh = []
+    for run in runs:
+        # The attempt too: a re-run keeps the run id and waits on you again.
+        key = f"{repo} run {run['id']}" + (f".{run['run_attempt']}" if run.get("run_attempt", 1) > 1 else "")
+        live.add(key)
+        if key in seen:
+            continue
+        pending = github.gh_get(f"repos/{repo}/actions/runs/{run['id']}/pending_deployments")
+        if not isinstance(pending, list):  # GitHub answers a list; anything else is unknown, not "nothing pending"
+            raise github.GHError(f"{repo} run {run['id']}: pending deployments: expected a list, got {type(pending).__name__}")
+        envs = [(p.get("environment") or {}).get("name") or "?" for p in pending if p.get("current_user_can_approve")]
+        if envs:
+            seen[key] = now
+            fresh.append({"kind": "approval", "key": key, "title": f"{repo} {run.get('head_branch') or run.get('name') or ''}".strip(),
+                          "message": f"waiting for your approval: {', '.join(envs)}",
+                          "url": safe_url(run.get("html_url"), f"https://github.com/{repo}/actions")})
     return fresh
 
 

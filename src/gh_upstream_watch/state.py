@@ -16,7 +16,7 @@ class Locked(Exception):
 
 def empty():
     return {"schema": SCHEMA, "seeded": False, "items": {}, "notifications": {"seen": {}},
-            "claimable": {"seen": {}}, "slack": {}, "outbox": [], "last_complete": None, "unknown_streak": {}, "pace": {}}
+            "claimable": {"seen": {}}, "approvals": {"seen": {}}, "slack": {}, "outbox": [], "last_complete": None, "unknown_streak": {}, "pace": {}}
 
 
 def load(path):
@@ -41,7 +41,7 @@ def load(path):
         for k, v in empty().items():
             if v is not None and not isinstance(v, bool) and not isinstance(st[k], type(v)):
                 raise ValueError(f"{k} is {type(st[k]).__name__}, not {type(v).__name__}")
-        if not all(isinstance(st[k].get("seen", {}), dict) for k in ("notifications", "claimable")):
+        if not all(isinstance(st[k].get("seen", {}), dict) for k in ("notifications", "claimable", "approvals")):
             raise ValueError("seen is not an object")
         if not all(isinstance(v, dict) for v in st["items"].values()) or not all(
                 isinstance(e, dict) and isinstance(e.get("alert"), dict) and isinstance(e.get("pending"), list)
@@ -128,7 +128,7 @@ def prune(st, now, retention_days, live=()):
     n = st["notifications"]["seen"]
     for k in [k for k, v in n.items() if k not in live and (_epoch(v) or now) < cutoff]:
         del n[k]
-    for store in (st["claimable"]["seen"], st["slack"].get("seen", {})):
+    for store in (st["claimable"]["seen"], st["approvals"]["seen"], st["slack"].get("seen", {})):
         for k in [k for k, v in store.items() if k not in live and isinstance(v, (int, float)) and v < cutoff]:
             del store[k]
 

@@ -128,7 +128,10 @@ What one pass checks:
   dropped from the watch list; it does not keep the run incomplete.
 - on your own open PRs: CI (check runs, commit statuses, and a fork's workflow runs waiting for a
   maintainer to approve them) and merge conflicts. A merge of your PR is a `milestone`, and your
-  first merge in a repo says so; so is a merged PR by someone else that names you (a roster PR).
+  first merge in a repo says so; so is a merged PR by someone else that names you (a roster PR);
+- for each repo in `approvals` (your own, say): a workflow run waiting on an environment you can
+  approve, such as a release held at a protected `pypi` environment. It alerts once per run (again
+  for a re-run), even on a seed run, since it is waiting on you right now.
 
 `inbox` reads only the saved state, so it is instant and makes no GitHub calls. It lists what waits
 on you (an accepted issue not yet claimed, an unanswered mention, red CI, a merge conflict, a draft,
@@ -170,6 +173,7 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
   "login": "octocat",
   "bots": [],
   "escalate_after_runs": 6,
+  "approvals": [],
   "slack": {"enabled": false}
 }
 ```
@@ -205,7 +209,7 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 | field | meaning |
 | --- | --- |
 | `v` | shape version, `1` |
-| `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed` (call to action), `ci_passed`, `ci_waiting`, `conflict` (call to action), `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
+| `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed` (call to action), `ci_passed`, `ci_waiting`, `conflict` (call to action), `approval` (call to action), `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
 | `action` | `true` when it needs you to do something (gates, competing PRs, reopens, requested changes, assignments, asks, claims, escalations) |
 | `key` | `owner/repo#n` (a notification about a repo rather than an item: `owner/repo`), the source for `stuck` |
 | `title`, `message` | the human text; the text line is `title: message (url)` |

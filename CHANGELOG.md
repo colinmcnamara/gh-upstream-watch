@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1] - 2026-10-04
+
+- `approvals`: list your own repos, and a workflow run waiting on an environment you can approve (a
+  release held at a protected `pypi` environment) alerts once per run, and again for a re-run, even
+  on a seed run.
+- CONTRIBUTING: the release steps as they now run (required checks on `main`, auto-merge, the
+  TestPyPI check, the environment approval).
+
 ## [0.3.0] - 2026-10-04
 
 Whose move is it: an inbox, CI on your own PRs, and milestones.
