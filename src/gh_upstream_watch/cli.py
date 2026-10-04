@@ -35,8 +35,9 @@ def build_parser():
         prog="gh-upstream-watch",
         description="Read-only alerts for your upstream work: tells you the next action when a maintainer "
                     "gate, a competing PR, or a review moves. Every GitHub call is a GET.")
-    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "init", "migrate", "forget", "explain", "check-pack"],
-                    help="run (default): one pass; status: summarize the state file; init: write a starter "
+    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "inbox", "init", "migrate", "forget", "explain", "check-pack"],
+                    help="run (default): one pass; status: summarize the state file; inbox: what waits on you "
+                         "and on them, from the last run; init: write a starter "
                          "config; migrate: convert a v0 state file (--from) into --state; forget KEY...: drop "
                          "items from the state; explain KEY: show what the tool sees for one item and why; check-pack FILE...: "
                          "validate rule packs and say what they do")
@@ -287,6 +288,7 @@ def run(cfg, a, now=None):
                 state.save(path, st)
             return 1
 
+        st["login"] = me
         old = st["items"]
         found = set()
         for repo in cfg["repos"]:
@@ -322,6 +324,8 @@ def run(cfg, a, now=None):
                     retry.setdefault(key, now)
                 continue
             retry.pop(key, None)
+            if fp.get("conflict") is None and key in old:
+                fp["conflict"] = old[key].get("conflict")  # GitHub still computing: keep the last answer
             found_alerts = core.changes(old.get(key), fp, me, rules)
             if cfg["hook"] and key in old:
                 extra = hooks.run(cfg["hook"], {"key": key, "repo": repo, "number": int(n), "me": me, "old": old[key], "new": fp})
@@ -333,6 +337,8 @@ def run(cfg, a, now=None):
             fp["_seen"] = now
             items[key] = fp
             for kind, msg, url in found_alerts:
+                if kind == "milestone" and fp.get("author") == me and core.first_merge(repo, me, int(n)):
+                    msg = f"FIRST MERGE in {repo}: your PR is in"
                 # Only first-sight alerts wait for seeding; a change against a saved baseline is always real.
                 src = "live" if key in old else source_of(key)
                 alerts.append((src, alert(now, kind, key, f"{key} {fp['title'][:50]}", msg, url or fp["url"])))
@@ -341,6 +347,18 @@ def run(cfg, a, now=None):
         for key, fp in old.items():
             if key not in items and key not in gone and now - fp.get("_seen", now) < cfg["baseline_days"] * 86400:
                 items[key] = fp
+
+        # The repo's pace, for `inbox`: once a day per repo where your own work is open. Advisory, so a
+        # failure only keeps yesterday's number; it never makes the run incomplete.
+        pace = st.setdefault("pace", {})
+        for repo in sorted({k.partition("#")[0] for k, v in items.items() if v.get("author") == me and v.get("state") == "open"}):
+            if now - pace.get(repo, {}).get("at", 0) > 86400:
+                try:
+                    got = core.repo_pace(repo)
+                    if got:
+                        pace[repo] = dict(got, at=now)
+                except Exception as e:
+                    log(f"pace {repo}: {e}")
 
         note_repos = cfg["notification_repos"]
         if note_repos is None:
@@ -358,11 +376,13 @@ def run(cfg, a, now=None):
             rules = packs.for_repo(rule_packs, repo)
             if not (rules["claimable"] and cfg["claim_groups"]):
                 continue
-            seen = dict(st["claimable"]["seen"])
+            seen, rows = dict(st["claimable"]["seen"]), set()
             try:
                 alerts += [(f"claim:{repo}", alert(now, **x))
-                           for x in core.claimable_asks(seen, repo, rules, cfg["claim_groups"], now, live)]
+                           for x in core.claimable_asks(seen, repo, rules, cfg["claim_groups"], now, rows)]
                 st["claimable"]["seen"] = seen
+                st["claimable"].setdefault("board", {})[repo] = sorted(rows)  # what the board lists now, for inbox
+                live |= rows
             except Exception as e:
                 unknown(f"claim board {repo}", e, f"claim:{repo}")
 
@@ -484,6 +504,80 @@ def status(cfg):
     return 0
 
 
+def _days(iso, now):
+    return (now - core._epoch(iso)) / 86400 if iso else None
+
+
+def inbox_rows(st, me, now):
+    """[(section, key, title, why, url)] from the saved state: what waits on you, what waits on them
+    (your own open work, with this repo's pace), and rows the claim boards list now."""
+    rows = []
+    for key, fp in sorted(st["items"].items()):
+        if fp.get("state") != "open":
+            continue
+        mine, why = fp.get("author") == me, []
+        why += [f"ACCEPTED by @{g['by']}: your move" for g in fp.get("gates", {}).values() if not g.get("done") and not g.get("bot")]
+        if fp.get("mention_at") and fp["mention_at"] > (fp.get("my_at") or ""):  # ISO 8601 UTC sorts as time
+            why.append("unanswered mention")
+        if mine:
+            ci = fp.get("ci") or {}
+            if ci.get("state") == "failure":
+                why.append("CI FAILED: " + ", ".join(ci.get("failing", [])[:3]))
+            if fp.get("conflict"):
+                why.append("merge conflict")
+            if fp.get("draft"):
+                why.append("draft: mark it ready for review")
+            cr = fp.get("changes_requested")
+            if cr and (fp.get("my_at") or "") < cr["at"]:  # ISO 8601 UTC strings sort as times
+                why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
+        if why:
+            rows.append(("you", key, fp.get("title", ""), "; ".join(why), fp.get("url", "")))
+            continue
+        if not mine:
+            continue
+        waited = _days(max(fp.get("created_at") or "", fp.get("my_at") or ""), now) or 0
+        age = _days(fp.get("created_at"), now) or 0  # the pace is open-to-merge, so the verdict uses age
+        touch = _days(fp.get("their_at"), now)
+        pace = st.get("pace", {}).get(key.partition("#")[0], {}).get("p90") if fp.get("pr") else None  # merge pace: PRs only
+        days = lambda d: core.plural(int(d), "day")  # noqa: E731
+        text = f"waiting {days(waited)}; " + (f"last maintainer touch {days(touch)} ago" if touch is not None else "no maintainer touch yet")
+        if (fp.get("ci") or {}).get("state") == "approval":
+            text += "; CI waits for a maintainer to approve the workflow runs"
+        if pace is not None:
+            text += f"; 9 in 10 merges here land within {pace:g} days: " + ("too early to nudge" if age < pace else "past that")
+        rows.append(("them", key, fp.get("title", ""), text, fp.get("url", "")))
+    seen = st["claimable"]["seen"]
+    for key in sorted({k for rows_ in st["claimable"].get("board", {}).values() for k in rows_}):
+        if key not in st["items"]:  # still on the board, and not already yours to watch
+            rows.append(("claimable", key, "", f"listed {ago(seen[key], now)}" if key in seen else "listed",
+                         f"https://github.com/{key.replace('#', '/issues/')}"))
+    return rows
+
+
+def inbox(cfg, a):
+    """Read-only, no network: the state the last run saved, sorted into whose move it is."""
+    path = cfg["state"]
+    if not os.path.exists(path):
+        print("no runs yet: run gh-upstream-watch once, then inbox")
+        return 0
+    st, now = state.load(path), time.time()
+    me = cfg.get("login") or st.get("login") or ""  # the last run saved who you are: no network here
+    rows = inbox_rows(st, me, now)
+    if a.json:
+        for section, key, title, why, url in rows:
+            print(json.dumps({"section": section, "key": key, "title": title, "why": why, "url": url}))
+        return 0
+    names = {"you": "waiting on you", "them": "waiting on them", "claimable": "claimable now"}
+    for section in names:
+        part = [r for r in rows if r[0] == section]
+        print(f"{names[section]} ({len(part)})")
+        for _, key, title, why, url in part:
+            print(f"  {key} {title[:50]}".rstrip() + f": {why}" + (f"\n    {url}" if url else ""))
+    last = st.get("last_complete")
+    print(f"as of the last complete run: {ago(last, now) if last else 'never'}")
+    return 0
+
+
 def init(a):
     path = Path(a.config or config_dir() / "config.json")
     if path.exists() and a.schedule and not a.force and not a.repos:
@@ -594,6 +688,8 @@ def main(argv=None):
         cfg = load_config(a)
         if a.command == "status":
             return status(cfg)
+        if a.command == "inbox":
+            return inbox(cfg, a)
         if a.command == "migrate":
             return migrate(cfg, a)
         if a.command == "forget":

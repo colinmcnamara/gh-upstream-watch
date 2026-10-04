@@ -48,5 +48,6 @@ def test_every_alert_kind_is_documented():
     from gh_upstream_watch import core
     row = next(line for line in README.splitlines() if line.startswith("| `kind` |"))
     listed = set(re.findall(r"`(\w+)`", row)) - {"kind"}
-    emitted = core.ACTION_KINDS | {"gate_done", "reference", "state", "labels", "merged", "review", "comments", "gone"}
+    emitted = core.ACTION_KINDS | {"gate_done", "reference", "state", "labels", "merged", "milestone", "ci_passed", "ci_waiting",
+                                   "review", "comments", "gone"}
     assert emitted <= listed, emitted - listed

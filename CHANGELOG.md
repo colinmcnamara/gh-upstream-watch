@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0] - 2026-10-04
+
+Whose move is it: an inbox, CI on your own PRs, and milestones.
+
+- `inbox`: everything waiting on you now (an accepted issue you have not claimed, an unanswered
+  mention, red CI, a merge conflict, a draft, changes requested since your last reply), then your own open
+  work that waits on them, with days waited, the last maintainer touch, and the time 9 in 10 of the repo's
+  recent PRs took to merge, so "too early to nudge" is a number. Reads only the state file; `--json` for scripts.
+- CI on your own open PRs: `ci_failed` (names the failing checks), `ci_passed`, and `ci_waiting`
+  when GitHub Actions holds a fork's runs for a maintainer's approval. Commit statuses (Buildkite,
+  DCO apps) count as well as check runs. A cancelled run is neither a failure nor a pass, and a CI
+  lookup that fails leaves the item unknown for the run, never "passed".
+- `conflict` when your open PR gets a merge conflict.
+- `milestone` replaces `merged` for your own PR ("FIRST MERGE in owner/repo" the first time) and for
+  a merged PR by someone else that names you.
+- Your own replies on review threads no longer alert as `COMMENTED by @you`.
+- Upgrading seeds the new checks quietly: no CI or conflict alert fires until a second reading differs.
+
 ## [0.2.3] - 2026-10-03
 
 Resonance: fewer, better alerts, from two days of real use. Replaying the same live data, 0.2.2
