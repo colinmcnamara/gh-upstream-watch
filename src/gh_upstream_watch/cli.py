@@ -15,7 +15,7 @@ from . import __version__, core, github, hooks, notify, packs, schedule, slack, 
 DEFAULTS = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
             "packs_dirs": [], "claim_groups": [], "recent_closed_days": 14, "retention_days": 30,
             "baseline_days": 90, "notification_repos": None, "login": None, "bots": [], "slack": {"enabled": False},
-            "escalate_after_runs": 6}
+            "escalate_after_runs": 6, "approvals": []}
 
 
 def config_dir():
@@ -137,7 +137,7 @@ def load_config(a):
         if not ok:
             raise ConfigError(f"config {key}: {val!r} is not a valid value (default {default!r})")
     cfg["packs_dirs"] = cfg["packs_dirs"] + (a.packs_dir or [])
-    for r in cfg["repos"]:
+    for r in cfg["repos"] + cfg["approvals"]:
         if r.count("/") != 1 or not all(r.split("/")):
             raise ConfigError(f"repo {r!r}: expected owner/repo")
     cfg["state"] = os.path.expanduser(cfg["state"] or default_state())
@@ -385,6 +385,16 @@ def run(cfg, a, now=None):
                 live |= rows
             except Exception as e:
                 unknown(f"claim board {repo}", e, f"claim:{repo}")
+
+        # Your own releases waiting on you (a protected pypi environment): never held while seeding,
+        # since it is waiting on you right now.
+        for repo in cfg["approvals"]:
+            seen = dict(st["approvals"]["seen"])
+            try:
+                alerts += [("live", alert(now, **x)) for x in core.approval_asks(seen, repo, now, live)]
+                st["approvals"]["seen"] = seen
+            except Exception as e:
+                unknown(f"approvals {repo}", e, f"approvals:{repo}")
 
         if cfg["slack"].get("enabled"):
             sst = json.loads(json.dumps(st["slack"]))
