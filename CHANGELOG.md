@@ -15,6 +15,16 @@ raised 40 alerts and 0.2.3 raises 3.
   closes your item still always alerts.
 - A network blip (connection reset, timeout, HTTP 502/503/504) gets one quick retry before the item
   is unknown for the run.
+- Hardened by a four-model red team (Opus, Codex, Grok, Sonnet). Every case it cannot verify alerts:
+  a discussion, a PR (whose reviews are not read), a full page of comments, a failed or capped
+  lookup, or an update GitHub does not explain. Mentions are read since the last update already
+  handled (not a fixed window), only strictly newer comments count, and an @you hidden in a quote,
+  code or an HTML comment does not. A maintainer's mention is shown before a later troll's, with the
+  other names listed; the snippet centers on the @you. Webhook text escapes `&`, `<` and `>` so a
+  comment cannot ping a Slack channel or disguise a link. At most 20 mention lookups per run.
+  Discussions and releases no longer share an issue's `owner/repo#n` key.
+- Fixed (since 0.1.0): "Closes #5, #6" (or "and", "&") now counts as closing every listed item, not
+  just the first, so a PR that closes your item always raises the competing-PR alert.
 
 ## [0.2.2] - 2026-10-02
 

@@ -162,10 +162,10 @@ def fold(alerts):
     host = {}
     for al in alerts:
         if al["kind"] != "notification":
-            host.setdefault(al["key"], al)
+            host.setdefault(al["key"].lower(), al)
     out = []
     for al in alerts:
-        h = host.get(al["key"]) if al["kind"] == "notification" else None
+        h = host.get(al["key"].lower()) if al["kind"] == "notification" else None
         if h is None:
             out.append(al)
             continue

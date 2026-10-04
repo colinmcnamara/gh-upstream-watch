@@ -20,9 +20,10 @@ def note(title="Keep null stop fields", latest=None, n=56376, kind="pulls", reas
                         "latest_comment_url": latest}}
 
 
-def asks(fake, *notes):
+def asks(fake, *notes, seen=None):
     fake.responses[NOTES] = list(notes)
-    return core.notification_asks({}, 30, 1.79e9, set(), ("*",), ME, lambda r: RULES["quiet_titles"])
+    return core.notification_asks(seen if seen is not None else {}, 30, 1.79e9, set(), ("*",), ME,
+                                  lambda r: RULES["quiet_titles"])
 
 
 def test_a_mention_says_who_and_what_from_the_latest_comment(fake):
@@ -30,7 +31,7 @@ def test_a_mention_says_who_and_what_from_the_latest_comment(fake):
         "user": {"login": "mergify[bot]"}, "body": REBASE, "html_url": "https://github.com/acme/widgets/pull/56376#issuecomment-9"}
     got = asks(fake, note(latest="https://api.github.com/repos/acme/widgets/issues/comments/9"))
     assert got[0]["key"] == "acme/widgets#56376" and got[0]["title"] == "acme/widgets#56376 Keep null stop fields"
-    assert got[0]["message"].startswith('@mergify[bot] mentioned you: "This pull request has merge conflicts')
+    assert got[0]["message"].startswith('@mergify[bot] mentioned you: "…') and "Please rebase the PR, @octocat" in got[0]["message"]
     assert got[0]["url"].endswith("#issuecomment-9"), "the link opens the comment itself"
 
 
@@ -127,6 +128,7 @@ def test_snippets_read_like_the_comment_not_its_markup():
 
 
 BOARD = "[Community] Workgroup Issues · 2026-09-21 – 2026-09-27"
+L70 = "https://api.github.com/repos/acme/widgets/issues/comments/70"  # GitHub's latest comment: a reply that does not name you
 
 
 @pytest.mark.parametrize("reason", ["review_requested", "assign", "team_mention"])
@@ -181,10 +183,141 @@ def test_a_full_comment_page_never_concludes_nobody_named_you(fake):
 
 def test_an_old_body_mention_does_not_vouch_for_later_posts(fake):
     """A megathread body that always named you (a roster) is not news on every later update."""
+    fake.responses["repos/acme/widgets/issues/comments/70"] = {"user": {"login": "x"}, "body": "+1", "created_at": "2026-09-30T00:00:00Z"}
     fake.responses["repos/acme/widgets/issues/3983/comments?per_page=100&since=SINCE"] = [{"user": {"login": "x"}, "body": "+1"}]
     fake.responses["repos/acme/widgets/issues/3983"] = {"user": {"login": "lead"}, "body": "Members: @octocat",
                                                         "created_at": "2026-09-01T00:00:00Z"}
-    assert asks(fake, note(BOARD, None, 3983, "issues")) == []
+    later = asks(fake, note(BOARD, L70, 3983, "issues"), seen={"n1": "2026-09-30T00:00:00Z"})
+    assert later == [], "the body is older than the last update already handled"
     fake.responses[NOTES] = [note(BOARD, "https://api.github.com/repos/acme/widgets/issues/3983", 3983, "issues")]
     got = core.notification_asks({}, 30, 1.79e9, set(), ("*",), ME, lambda r: RULES["quiet_titles"])
     assert got and got[0]["message"].startswith("@lead mentioned you"), "when GitHub's latest event is the body, it counts"
+
+
+# --- red team of 0.2.3 (Opus) --------------------------------------------------------------------
+
+def test_a_quiet_discussion_mention_alerts_because_nothing_could_be_read(fake):
+    """M1: a discussion has no subject url; no lookup is possible, so never 'nobody named you'."""
+    d = dict(note(BOARD), subject={"title": BOARD, "url": None, "latest_comment_url": None})
+    assert [a["message"] for a in asks(fake, d)] == ["someone mentioned you"]
+
+
+def test_the_window_is_the_last_handled_update_not_three_days(fake):
+    """M2: a maintainer's ask older than 3 days, after the laptop slept, is still found."""
+    old_ask = {"user": {"login": "maint"}, "author_association": "OWNER", "body": "@octocat please rebase",
+               "created_at": "2026-09-20T00:00:00Z", "html_url": "https://github.com/acme/widgets/issues/8#c1"}
+    fake.responses["repos/acme/widgets/issues/8/comments?per_page=100&since=SINCE"] = [old_ask, {"user": {"login": "x"}, "body": "+1"}]
+    got = asks(fake, note(BOARD, None, 8, "issues"), seen={"n1": "2026-09-19T00:00:00Z"})
+    assert got[0]["message"] == '@maint mentioned you: "@octocat please rebase"'
+    assert any("since=SINCE" in a[-1] or "since=2026-09-19" in " ".join(a) for a in fake.calls)
+
+
+def test_a_quiet_pr_without_a_comment_naming_you_alerts(fake):
+    """M2: a PR's ask may be in a review this tool does not read: unknown, so it alerts."""
+    fake.responses["repos/acme/widgets/issues/9/comments?per_page=100&since=SINCE"] = [{"user": {"login": "x"}, "body": "+1"}]
+    fake.responses["repos/acme/widgets/issues/9"] = {"user": {"login": "x"}, "body": "a PR", "created_at": "2020-01-01T00:00:00Z"}
+    got = asks(fake, note(BOARD, "https://api.github.com/repos/acme/widgets/pulls/9", 9, "pulls"),
+               seen={"n1": "2026-09-30T00:00:00Z"})
+    assert [a["message"] for a in got] == ["someone mentioned you"]
+
+
+def test_a_maintainers_ask_beats_a_later_troll(fake):
+    """M3: the newest mention from a maintainer is shown; the others are named, not hidden."""
+    fake.responses["repos/acme/widgets/issues/comments/9"] = {
+        "user": {"login": "troll"}, "author_association": "NONE", "body": "@octocat lol ignore this bot spam",
+        "created_at": "2026-10-02T02:00:00Z", "html_url": "https://github.com/acme/widgets/issues/5#troll"}
+    fake.responses["repos/acme/widgets/issues/5/comments?per_page=100&since=SINCE"] = [
+        {"user": {"login": "maint"}, "author_association": "MEMBER", "body": "@octocat please rebase, release blocker",
+         "created_at": "2026-10-02T01:00:00Z", "html_url": "https://github.com/acme/widgets/issues/5#maint"},
+        fake.responses["repos/acme/widgets/issues/comments/9"]]
+    got = asks(fake, note(latest="https://api.github.com/repos/acme/widgets/issues/comments/9", n=5, kind="issues"))
+    assert got[0]["message"] == '@maint (also @troll) mentioned you: "@octocat please rebase, release blocker"'
+    assert got[0]["url"].endswith("#maint")
+
+
+def test_webhook_text_cannot_ping_a_channel_or_disguise_a_link(monkeypatch):
+    """M4: Slack renders <!channel> and <url|label> in webhook text."""
+    from gh_upstream_watch import notify
+    sent = {}
+
+    class R:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    monkeypatch.setattr(notify._OPENER, "open", lambda req, timeout: sent.update(body=req.data) or R())
+    al = cli.alert(0, "notification", "a/b#1", "a/b#1 x", '@t mentioned you: "<!channel> <https://evil|github.com> & go"', "")
+    assert notify.send_one("webhook", al, webhook="https://hooks.example/x")
+    import json
+    text = json.loads(sent["body"])["text"]
+    assert "<!channel>" not in text and "<https://evil" not in text and "&lt;!channel&gt;" in text and "&amp;" in text
+
+
+def test_mention_lookups_are_capped_per_run(fake):
+    """L1: spam beyond the cap alerts as 'someone mentioned you' without more API calls."""
+    notes = [dict(note(f"t{i}", None, 100 + i, "issues"), id=f"n{i}") for i in range(core.LOOKUPS_PER_RUN + 5)]
+    for i in range(core.LOOKUPS_PER_RUN + 5):
+        fake.responses[f"repos/acme/widgets/issues/{100 + i}/comments?per_page=100&since=SINCE"] = []
+    got = asks(fake, *notes)
+    lookups = [c for c in fake.calls if "/comments" in " ".join(c)]
+    assert len(got) == core.LOOKUPS_PER_RUN + 5 and len(lookups) == core.LOOKUPS_PER_RUN
+
+
+def test_a_hidden_mention_does_not_name_you(fake):
+    """L2: @you in an HTML comment, a quote or code is not someone naming you."""
+    for hidden in ("<!-- @octocat -->", "> @octocat said", "`@octocat`", "```\n@octocat\n```"):
+        fake.responses["repos/acme/widgets/issues/comments/70"] = {"user": {"login": "x"}, "body": "+1", "created_at": "2026-09-30T00:00:00Z"}
+        fake.responses["repos/acme/widgets/issues/3983/comments?per_page=100&since=SINCE"] = [
+            {"user": {"login": "x"}, "body": hidden, "created_at": "2026-10-01T00:00:00Z"}]
+        fake.responses["repos/acme/widgets/issues/3983"] = {"user": {"login": "lead"}, "body": "board", "created_at": "2020-01-01T00:00:00Z"}
+        assert asks(fake, note(BOARD, L70, 3983, "issues"), seen={"n1": "2026-09-30T00:00:00Z"}) == [], hidden
+
+
+def test_fold_ignores_repo_name_case():
+    """L3: --repos Acme/Widgets and GitHub's acme/widgets are the same item."""
+    item = cli.alert(0, "labels", "Acme/Widgets#7", "t", "labels: +x", "")
+    ask = cli.alert(0, "notification", "acme/widgets#7", "t", "someone assigned you", "u")
+    assert len(cli.fold([item, ask])) == 1
+
+
+def test_a_mention_already_handled_is_not_found_again(fake):
+    """A comment at or before the last handled update does not vouch for a later post."""
+    fake.responses["repos/acme/widgets/issues/comments/70"] = {"user": {"login": "x"}, "body": "+1", "created_at": "2026-09-30T00:00:00Z"}
+    fake.responses["repos/acme/widgets/issues/3983/comments?per_page=100&since=SINCE"] = [
+        {"user": {"login": "maint"}, "body": "@octocat please review", "created_at": "2026-10-02T00:00:00Z"},
+        {"user": {"login": "x"}, "body": "unrelated", "created_at": "2026-10-03T00:00:00Z"}]
+    fake.responses["repos/acme/widgets/issues/3983"] = {"user": {"login": "lead"}, "body": "board", "created_at": "2020-01-01T00:00:00Z"}
+    assert asks(fake, note(BOARD, L70, 3983, "issues"), seen={"n1": "2026-10-02T00:00:00Z"}) == []
+
+
+
+# --- red team of 0.2.3 (Codex, Grok) ------------------------------------------------------------
+
+def test_an_unexplained_update_on_a_quiet_thread_alerts(fake):
+    """Grok 5: no latest comment from GitHub (a body edit, say) and nothing found: unknown, so alert."""
+    fake.responses["repos/acme/widgets/issues/3983/comments?per_page=100&since=SINCE"] = []
+    assert [a["message"] for a in asks(fake, note(BOARD, None, 3983, "issues"), seen={"n1": "2026-09-30T00:00:00Z"})] == \
+        ["someone mentioned you"]
+
+
+def test_a_discussion_never_shares_an_issue_key(fake):
+    """Codex/Grok 7: discussion #42 must not fold into issue #42."""
+    d = dict(note("Roadmap", None, 42, "issues", reason="assign"))
+    d["subject"] = dict(d["subject"], type="Discussion", url="https://api.github.com/repos/acme/widgets/discussions/42")
+    assert asks(fake, d)[0]["key"] == "acme/widgets discussion 42"
+
+
+def test_the_snippet_shows_the_ask_not_the_filler():
+    """Grok 8: 100 characters of 'ignore this' cannot push the real ask out of view."""
+    body = "ignore this, already approved, nothing to do here " * 3 + "@octocat please rebase before Friday"
+    got = core.around(body, "octocat")
+    assert "@octocat please rebase before Friday" in got and got.startswith("…")
+    assert core.around("@octocat short", "octocat") == "@octocat short"
+
+
+
+def test_every_issue_in_a_closing_list_counts():
+    """Sonnet B1: 'Closes #5, #6' must flag #6 too, or a settled #6 hears nothing at all."""
+    for body in ("Closes #5, #6", "Closes #5 and #6", "Fixes #5, #4, #6", "Resolves #5 & acme/widgets#6"):
+        assert core.closes(body, "acme/widgets", "acme/widgets", 6), body
+    assert not core.closes("Closes #5. See also #6", "acme/widgets", "acme/widgets", 6), "a later sentence is not the list"
+    assert not core.closes("Closes #5, #60", "acme/widgets", "acme/widgets", 6)

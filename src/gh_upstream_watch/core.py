@@ -54,11 +54,19 @@ def mentions(body, login):
     return re.search(r"(?i)(?<![\w-])@" + re.escape(login) + r"(?![\w-])", body or "") is not None
 
 
+# More targets after the first: "Closes #5, #6 and acme/x#7".
+MORE_RE = re.compile(r"\s*(?:,|&|\band\b)\s*(?:https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/|([\w.-]+/[\w.-]+)#|#)(\d+)(?!\d)", re.I)
+
+
 def closes(body, src_repo, repo, n):
-    """True when body closes repo#n. A bare #n means the source's own repo."""
-    for m in CLOSE_RE.finditer(body or ""):
-        if (m.group(1) or m.group(2) or src_repo).lower() == repo.lower() and int(m.group(3)) == n:
-            return True
+    """True when body says it closes repo#n, including later items in a list ("Closes #5, #6").
+    A bare #n means the source's own repo."""
+    body = body or ""
+    for m in CLOSE_RE.finditer(body):
+        while m:
+            if (m.group(1) or m.group(2) or src_repo).lower() == repo.lower() and int(m.group(3)) == n:
+                return True
+            m = MORE_RE.match(body, m.end())
     return False
 
 
@@ -219,36 +227,69 @@ def snippet(body, n=100):
 
 
 UNKNOWN = "unknown"  # who_named_me could not look: never treat that as "nobody named you"
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+LOOKUPS_PER_RUN = 20  # ponytail: fixed cap; mention spam beyond it alerts as "someone mentioned you"
 
 
-def who_named_me(n, me):
-    """(login, comment-or-item) for the newest place in this notification's thread that @-names you:
-    the latest comment, a recent comment, or the issue or PR body. None when nothing names you;
-    UNKNOWN when a lookup failed."""
+def visible(body):
+    """What a reader sees: no HTML comments, quoted lines or code. A hidden @you does not name you."""
+    body = re.sub(r"<!--.*?-->|```.*?```|`[^`\n]*`", " ", body or "", flags=re.S)
+    return "\n".join(line for line in body.splitlines() if not line.lstrip().startswith(">"))
+
+
+def around(body, me, n=100):
+    """The words around the first @you, so the ask itself shows even after 100 characters of filler."""
+    text = snippet(body, 10 ** 6)
+    m = re.search(r"(?i)(?<![\w-])@" + re.escape(me) + r"(?![\w-])", text)
+    start = max(0, m.start() - 30) if m else 0
+    out = text[start:start + n]
+    return ("…" if start else "") + (out if start + n >= len(text) else out.rstrip() + "…")
+
+
+def who_named_me(n, me, since, budget):
+    """(login, comment-or-item, other logins) for the place in this notification's thread that @-names
+    you since `since`, preferring a maintainer's mention over anyone else's. None when nothing names
+    you; UNKNOWN when it could not fully look (a failed or capped lookup, a discussion, a PR whose
+    reviews it does not read, more comments than one page)."""
     subject = n.get("subject") or {}
     latest = subject.get("latest_comment_url") or ""
-    thread = (subject.get("url") or "").replace("https://api.github.com/", "").replace("/pulls/", "/issues/")
+    api = subject.get("url") or ""
+    thread = api.replace("https://api.github.com/", "").replace("/pulls/", "/issues/")
+    if not thread:
+        return UNKNOWN  # a discussion or release: nothing to read
+    if budget[0] <= 0:
+        return UNKNOWN
+    budget[0] -= 1
     try:
+        found = []
         if "/comments/" in latest:
-            c = github.gh_get(latest.replace("https://api.github.com/", ""))
-            if mentions(c.get("body"), me):
-                return who(c), c
-        if not thread:
-            return None
-        # One page of comments around the notification's update: a megathread is never read whole.
-        since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_epoch(n.get("updated_at")) - 3 * 86400))
-        page = github.gh_get(f"{thread}/comments", {"since": since, "per_page": 100}) or []
-        for c in reversed(page):
-            if mentions(c.get("body"), me) and who(c) != me:
-                return who(c), c
-        if len(page) >= 100:
-            return UNKNOWN  # more than we read: never conclude that nobody named you
-        # The body counts only when it is the news: a new issue, or GitHub's latest event is the body
-        # itself. A megathread body that has always named you does not vouch for every later post.
+            found.append(github.gh_get(latest.replace("https://api.github.com/", "")))
+        # One page of comments since the last update this tool handled: a megathread is never read whole.
+        try:
+            page = github.gh_get(f"{thread}/comments", {"since": since, "per_page": 100}) or []
+        except github.GHError:
+            if not found:
+                raise
+            page = []  # the latest comment already answers who; the page only refines it
+        found += page
+        # Strictly newer than the last handled update: a mention already alerted is not found again.
+        newer = [c for c in found if _epoch(c.get("updated_at") or c.get("created_at") or "") > _epoch(since)]
+        named = [c for c in newer if mentions(visible(c.get("body")), me) and who(c) != me]
+        if named:
+            named.sort(key=lambda c: c.get("created_at") or "")
+            pick = next((c for c in reversed(named) if c.get("author_association") in TRUSTED), named[-1])
+            others = sorted({who(c) for c in named} - {who(pick)})
+            return who(pick), pick, others
+        if len(page) >= 100 or "/pulls/" in api:
+            return UNKNOWN  # more than one page, or a PR's reviews: never conclude nobody named you
+        # The body counts only when it is the news: new since `since`, or GitHub's latest event is the
+        # body itself. A megathread body that always named you does not vouch for every later post.
         item = github.gh_get(thread)
-        fresh = latest.rstrip("/") == (subject.get("url") or "").rstrip("/") or _epoch(item.get("created_at")) >= _epoch(since)
-        if fresh and mentions(item.get("body"), me) and who(item) != me:
-            return who(item), item
+        fresh = latest.rstrip("/") == api.rstrip("/") or _epoch(item.get("created_at")) >= _epoch(since)
+        if fresh and mentions(visible(item.get("body")), me) and who(item) != me:
+            return who(item), item, []
+        if "/comments/" not in latest and not fresh:
+            return UNKNOWN  # GitHub did not say what changed (a body edit, say): do not conclude nobody
     except github.GHError:
         return UNKNOWN
     return None
@@ -267,25 +308,31 @@ def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, qu
     names you: GitHub keeps calling every later post in a thread you were named in a "mention".
     Every id GitHub still returns goes into `live`, so pruning never forgets it."""
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - retention_days * 86400))
-    fresh = []
+    fresh, budget = [], [LOOKUPS_PER_RUN]
     for n in github.paginate("notifications", {"participating": "true", "since": since}, per_page=50):
         live.add(n["id"])
         if not repo_matches(n["repository"]["full_name"], repos) or n["reason"] not in ASKS or seen.get(n["id"]) == n["updated_at"]:
             continue
+        # Look at what happened since the last update of this thread that was handled, exactly; a
+        # thread seen for the first time is read back over the retention window.
+        prev = seen.get(n["id"]) or since
         seen[n["id"]] = n["updated_at"]
         repo, subject = n["repository"]["full_name"], n.get("subject") or {}
         title = subject.get("title") or ""
         url = github.html_url(subject.get("url")) or n["repository"].get("html_url", "")
         number = (subject.get("url") or "").rstrip("/").split("/")[-1]
-        key = f"{repo}#{number}" if number.isdigit() else repo
+        # Only issues and PRs share the owner/repo#n space; a discussion or release #42 is not issue #42.
+        kind = subject.get("type") or ("PullRequest" if "/pulls/" in (subject.get("url") or "") else "Issue")
+        key = f"{repo}#{number}" if number.isdigit() and kind in ("Issue", "PullRequest") else f"{repo} {kind.lower()} {number}".strip()
         verb = ASKS[n["reason"]]
-        named = who_named_me(n, me) if me and n["reason"] == "mention" else None
+        named = who_named_me(n, me, prev, budget) if me and n["reason"] == "mention" else None
         # Only a plain mention is filtered on a megathread, and only when we looked and nobody named
         # you. Review requests, assignments and team mentions always alert; so does a failed lookup.
         if n["reason"] == "mention" and named is None and any(r.search(title) for r in quiet(repo)):
             continue
         named = None if named == UNKNOWN else named
-        message = (f"@{named[0]} {verb}: \"{snippet(named[1].get('body'))}\"" if named else f"someone {verb}")
+        also = f" (also @{', @'.join(named[2])})" if named and named[2] else ""
+        message = (f"@{named[0]}{also} {verb}: \"{around(visible(named[1].get('body')), me)}\"" if named else f"someone {verb}")
         fresh.append({"kind": "notification", "key": key, "title": f"{key} {title[:50]}", "message": message,
                       "url": github.html_url((named[1].get("html_url") if named else "") or "") or url})
     return fresh

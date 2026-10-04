@@ -89,7 +89,9 @@ def send_one(dest, alert, backend="none", as_json=False, webhook=None):
         elif dest == "desktop":
             subprocess.run(desktop_argv(backend, alert), timeout=30, check=True, capture_output=True)
         elif dest == "webhook":
-            body = json.dumps({"text": text(alert), "alert": alert}).encode()
+            # Slack-style webhooks render <!channel> and <url|label>: escape so commenter text stays text.
+            safe = text(alert).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            body = json.dumps({"text": safe, "alert": alert}).encode()
             req = urllib.request.Request(webhook, data=body, headers={"Content-Type": "application/json"})
             with _OPENER.open(req, timeout=10) as r:
                 if not 200 <= r.status < 300:
