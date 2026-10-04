@@ -85,6 +85,7 @@ gh-upstream-watch init --repos acme/widgets       # writes ~/.config/gh-upstream
 gh-upstream-watch --dry-run                       # one pass, print only, save nothing
 gh-upstream-watch                                 # one pass: alerts, then save state
 gh-upstream-watch status                          # what the state file knows, and how to fix what failed
+gh-upstream-watch inbox                           # whose move it is on each open item (--json for scripts)
 gh-upstream-watch explain acme/widgets#390        # what the tool sees for one item, and what it would alert
 gh-upstream-watch forget acme/widgets#390         # stop watching an item (it seeds again if search finds it)
 ```
@@ -125,6 +126,15 @@ What one pass checks:
   (OWNER and COLLABORATOR by default), and a row's link must point into the watched repo;
 - an item that is deleted or no longer visible to you (404 or 410) alerts once as `GONE` and is
   dropped from the watch list; it does not keep the run incomplete.
+- on your own open PRs: CI (check runs, commit statuses, and a fork's workflow runs waiting for a
+  maintainer to approve them) and merge conflicts. A merge of your PR is a `milestone`, and your
+  first merge in a repo says so; so is a merged PR by someone else that names you (a roster PR).
+
+`inbox` reads only the saved state, so it is instant and makes no GitHub calls. It lists what waits
+on you (an accepted issue not yet claimed, an unanswered mention, red CI, a merge conflict, a draft,
+changes requested since your last reply), then what waits on them: your own open work, how long it has
+waited, when a maintainer last touched it, and how long 9 in 10 of the repo's last 100 merged PRs
+took from open to merge (refreshed daily), so you can see when it is still too early to nudge.
 
 If a source stays unknown for `escalate_after_runs` runs in a row (6, about three hours at the
 default interval), one real alert goes out through your notifiers, with the fix when there is a known
@@ -195,7 +205,7 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 | field | meaning |
 | --- | --- |
 | `v` | shape version, `1` |
-| `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `review`, `changes_requested`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
+| `kind` | `gate` (call to action), `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed` (call to action), `ci_passed`, `ci_waiting`, `conflict` (call to action), `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
 | `action` | `true` when it needs you to do something (gates, competing PRs, reopens, requested changes, assignments, asks, claims, escalations) |
 | `key` | `owner/repo#n` (a notification about a repo rather than an item: `owner/repo`), the source for `stuck` |
 | `title`, `message` | the human text; the text line is `title: message (url)` |

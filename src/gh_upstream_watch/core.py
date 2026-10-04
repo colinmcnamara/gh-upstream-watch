@@ -11,7 +11,7 @@ KEEP_IDS = 200
 SETTLED_DAYS = 7  # ponytail: fixed; "referenced by" on an item closed longer than this is dropped
 # Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
 ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
-                "mentions", "slack", "stuck", "changes_requested"}
+                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict"}
 
 
 def plural(n, word):
@@ -112,6 +112,9 @@ def _fingerprint(i, repo, n, me, rules, bots):
     comments = github.paginate(f"repos/{repo}/issues/{n}/comments") if i.get("comments") else []
     others = [c for c in comments if who(c) != me]
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
+    mine = [c for c in comments if who(c) == me]
+    # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you.
+    touches = [c.get("created_at") for c in others if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
         "closed_at": i.get("closed_at"),
@@ -127,6 +130,12 @@ def _fingerprint(i, repo, n, me, rules, bots):
         "mention_ids": [c["id"] for c in others if mentions(c.get("body"), me)],  # few: no cap, so edits are seen
         "gates": {},
         "xrefs": cross_refs(repo, n, me),
+        "author": who(i), "created_at": i.get("created_at"),
+        "my_at": max((c.get("created_at") or "" for c in mine), default=None),
+        # When the latest comment naming you was written. Not edited: a roll call re-edited weekly is not
+        # a new ask (an edit that adds @you still alerts through notifications and mention_ids).
+        "mention_at": max((c.get("created_at") or "" for c in others if mentions(c.get("body"), me)), default=None),
+        "names_me": who(i) != me and mentions(visible(i.get("body")), me),
     }
     for g in rules["gates"]:
         for c in others:
@@ -140,9 +149,84 @@ def _fingerprint(i, repo, n, me, rules, bots):
         pr = github.gh_get(f"repos/{repo}/pulls/{n}")
         reviews = github.paginate(f"repos/{repo}/pulls/{n}/reviews")
         fp["merged"] = bool(pr.get("merged"))
+        fp["draft"] = bool(pr.get("draft"))
         # Review ids, not (reviewer, state) pairs: a second approval after changes-requested is new.
+        # Not yours: a reply on a review thread is recorded as your own COMMENTED review. It is still a reply.
+        fp["my_at"] = max([fp["my_at"] or ""] + [r.get("submitted_at") or "" for r in reviews if who(r) == me]) or None
+        reviews = [r for r in reviews if who(r) != me]
         fp["reviews"] = sorted([r["id"], who(r), r["state"]] for r in reviews if not is_bot(who(r), bots))
+        # "dirty" is a conflict; "unknown" (GitHub still computing) is None, and the run keeps the last answer.
+        ms = pr.get("mergeable_state")
+        fp["conflict"] = None if ms in (None, "unknown") else ms == "dirty"
+        last = {}  # each reviewer's latest verdict; a later plain comment does not clear a request
+        for r in sorted(reviews, key=lambda r: r["id"]):
+            if r["state"] != "COMMENTED" and not is_bot(who(r), bots):
+                last[who(r)] = r
+        asked = [r for r in last.values() if r["state"] == "CHANGES_REQUESTED"]
+        if asked:
+            fp["changes_requested"] = {"by": sorted(who(r) for r in asked), "at": max(r.get("submitted_at") or "" for r in asked)}
+        touches += [r.get("submitted_at") for r in reviews if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
+        if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
+            sha = (pr.get("head") or {}).get("sha")
+            fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
+    fp["their_at"] = max((t for t in touches if t), default=None)
     return fp
+
+
+FAILED = ("failure", "timed_out", "startup_failure")
+PASSED = ("success", "neutral", "skipped")  # cancelled is neither: pending until it is re-run
+
+
+def ci_status(repo, sha):
+    """{"state": failure|approval|pending|success, "failing": names, "sha": sha} for a commit, or None when no CI
+    ran. "approval" is GitHub Actions waiting for a maintainer to approve a fork's workflow runs.
+    Any failed call (a 404 can be a token without access) raises: CI unknown, never "passed"."""
+    checks = []
+    for page in range(1, github.MAX_PAGES + 1):
+        r = github.gh_get(f"repos/{repo}/commits/{sha}/check-runs", {"per_page": 100, "page": page})
+        checks += r.get("check_runs") or []
+        if len(checks) >= (r.get("total_count") or 0) or not r.get("check_runs"):
+            break
+    if len(checks) < (r.get("total_count") or 0):
+        raise github.Incomplete(f"{repo}@{sha}: {len(checks)} of {r['total_count']} check runs")
+    runs = github.gh_get(f"repos/{repo}/actions/runs", {"head_sha": sha, "per_page": 100}).get("workflow_runs") or []
+    combined = github.gh_get(f"repos/{repo}/commits/{sha}/status") or {}  # commit statuses: buildkite, DCO apps
+    failing = sorted({c.get("name") or "?" for c in checks if c.get("conclusion") in FAILED})
+    if combined.get("total_count") and combined.get("state") in ("failure", "error"):
+        failing.append("commit status")
+    if failing:
+        return {"state": "failure", "failing": failing, "sha": sha}
+    if any(x.get("conclusion") == "action_required" for x in runs + checks):
+        return {"state": "approval", "sha": sha}
+    # Anything not plainly passed (in progress, stale, a conclusion GitHub adds later) is still pending.
+    if any(c.get("status") != "completed" or c.get("conclusion") not in PASSED for c in checks) or (
+            combined.get("total_count") and combined.get("state") == "pending"):
+        return {"state": "pending", "sha": sha}
+    return {"state": "success", "sha": sha} if checks or combined.get("total_count") else None
+
+
+def first_merge(repo, me, n):
+    """True only when a complete search finds exactly one merged PR of yours in repo, and it is #n.
+    Anything else (a lagging index, a partial result, a failed call) keeps the plain message."""
+    try:
+        r = github.gh_get("search/issues", {"q": f"repo:{repo} is:pr is:merged author:{me}", "per_page": 2, "page": 1})
+        return (not r.get("incomplete_results") and r.get("total_count") == 1
+                and [i.get("number") for i in r.get("items", [])] == [n])
+    except github.GHError:
+        return False
+
+
+def repo_pace(repo):
+    """Days from open to merge over the repo's 100 most recently updated merged PRs: the median, and
+    the 90th percentile. The median alone misleads where insiders merge their own PRs within hours."""
+    r = github.gh_get("search/issues", {"q": f"repo:{repo} is:pr is:merged", "sort": "updated", "order": "desc",
+                                        "per_page": 100, "page": 1})
+    days = sorted((_epoch(i["closed_at"]) - _epoch(i["created_at"])) / 86400 for i in r.get("items", [])
+                  if i.get("closed_at") and i.get("created_at"))
+    if not days:
+        return None
+    p90 = days[max(0, -(-len(days) * 9 // 10) - 1)]  # nearest rank
+    return {"days": round(days[len(days) // 2], 1), "p90": round(p90, 1), "n": len(days)}
 
 
 def changes(old, new, me, rules):
@@ -176,7 +260,26 @@ def changes(old, new, me, rules):
     if added or removed:
         out.append(("labels", "labels: " + " ".join(["+" + x for x in added] + ["-" + x for x in removed]), None))
     if new.get("merged") and not old.get("merged"):
-        out.append(("merged", "MERGED", None))
+        if new.get("author") == me:
+            out.append(("milestone", msg.get("milestone", "MERGED: your PR is in"), None))
+        elif new.get("names_me"):
+            out.append(("milestone", f"MERGED: a PR by @{new['author']} that names you", None))
+        else:
+            out.append(("merged", "MERGED", None))
+    # A recorded unknown (None) counts as "not a conflict before"; only a state from before 0.3.0 seeds.
+    if new.get("conflict") and "conflict" in old and old["conflict"] is not True and new.get("author") == me:
+        out.append(("conflict", "MERGE CONFLICT: rebase or merge main", None))
+    nci, oci = new.get("ci") or {}, old.get("ci") or {}
+    ci, was = nci.get("state"), oci.get("state")
+    # A state from before CI was recorded seeds quietly. A new failure on a new commit is news even
+    # when the last reading was already red.
+    if "ci" in old and (ci != was or ci == "failure" and (nci.get("sha"), nci.get("failing")) != (oci.get("sha"), oci.get("failing"))):
+        if ci == "failure":
+            out.append(("ci_failed", "CI FAILED: " + ", ".join(new["ci"].get("failing", [])[:3]), None))
+        elif ci == "success":
+            out.append(("ci_passed", "CI passed", None))
+        elif ci == "approval":
+            out.append(("ci_waiting", "CI waiting for a maintainer to approve the workflow runs (fork PR): nothing to do", None))
     known_ids = {r[0] for r in old.get("reviews", []) if len(r) == 3}
     legacy = {tuple(r) for r in old.get("reviews", []) if len(r) == 2}  # v0 state stored (login, state)
     fresh = [r for r in new.get("reviews", []) if r[0] not in known_ids and (r[1], r[2]) not in legacy]
