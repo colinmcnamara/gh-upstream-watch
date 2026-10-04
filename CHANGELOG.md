@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.3.0] - Unreleased
+## [0.3.0] - 2026-10-04
 
 Whose move is it: an inbox, CI on your own PRs, and milestones.
 
