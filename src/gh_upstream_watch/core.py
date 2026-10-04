@@ -1,4 +1,5 @@
 """Fingerprints of watched items, and the diff that turns two fingerprints into alerts."""
+import calendar
 import fnmatch
 import re
 import time
@@ -7,6 +8,7 @@ from . import github
 from .packs import authorized, parse_claimable
 
 KEEP_IDS = 200
+SETTLED_DAYS = 7  # ponytail: fixed; "referenced by" on an item closed longer than this is dropped
 # Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
 ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
                 "mentions", "slack", "stuck", "changes_requested"}
@@ -52,11 +54,19 @@ def mentions(body, login):
     return re.search(r"(?i)(?<![\w-])@" + re.escape(login) + r"(?![\w-])", body or "") is not None
 
 
+# More targets after the first: "Closes #5, #6 and acme/x#7".
+MORE_RE = re.compile(r"\s*(?:,|&|\band\b)\s*(?:https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/|([\w.-]+/[\w.-]+)#|#)(\d+)(?!\d)", re.I)
+
+
 def closes(body, src_repo, repo, n):
-    """True when body closes repo#n. A bare #n means the source's own repo."""
-    for m in CLOSE_RE.finditer(body or ""):
-        if (m.group(1) or m.group(2) or src_repo).lower() == repo.lower() and int(m.group(3)) == n:
-            return True
+    """True when body says it closes repo#n, including later items in a list ("Closes #5, #6").
+    A bare #n means the source's own repo."""
+    body = body or ""
+    for m in CLOSE_RE.finditer(body):
+        while m:
+            if (m.group(1) or m.group(2) or src_repo).lower() == repo.lower() and int(m.group(3)) == n:
+                return True
+            m = MORE_RE.match(body, m.end())
     return False
 
 
@@ -104,6 +114,7 @@ def _fingerprint(i, repo, n, me, rules, bots):
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
+        "closed_at": i.get("closed_at"),
         "labels": sorted(label["name"] for label in i["labels"]),
         "assignees": sorted(a["login"] for a in i.get("assignees") or []),
         "comments": len(comments),
@@ -174,6 +185,9 @@ def changes(old, new, me, rules):
         out.append((kind, ", ".join(f"{st.replace('_', ' ')} by @{u}" for _, u, st in fresh), None))
     known = {ref[0]: ref for ref in old.get("xrefs", [])}
     target = new["url"].rstrip("/").split("/")[-1]
+    # Quiet only if the title was quiet before too: renaming an issue cannot silence it.
+    quiet = all(any(r.search(t) for r in rules["quiet_titles"]) for t in (new.get("title", ""), old.get("title", "")))
+    settled = new.get("state") == "closed" and _epoch(new.get("closed_at")) < time.time() - SETTLED_DAYS * 86400
     for url, kind, author, cl in new.get("xrefs", []):
         was = known.get(url)
         # A known reference alerts again only when an edit makes it a closing PR.
@@ -182,10 +196,10 @@ def changes(old, new, me, rules):
         fields = dict(number=url.rstrip("/").split("/")[-1], author=author, kind=kind, target=target)
         if cl and kind == "pr":
             out.append(("competing_pr", msg.get("competing_pr", "COMPETING PR #{number}").format(**fields), url))
+        elif quiet or settled:
+            continue  # a megathread, or an item closed a while ago, is referenced constantly: not news
         else:
             out.append(("reference", msg.get("reference", "referenced by #{number}").format(**fields), url))
-    # Quiet only if the title was quiet before too: renaming an issue cannot silence it.
-    quiet = all(any(r.search(t) for r in rules["quiet_titles"]) for t in (new.get("title", ""), old.get("title", "")))
     since = old.get("max_comment_id")
     if quiet:
         # Set difference, not "id > since": an older comment edited to name you counts too.
@@ -203,20 +217,124 @@ def changes(old, new, me, rules):
     return out
 
 
-def notification_asks(seen, retention_days, now, live, repos=("*",)):
-    """Unread notifications, any repo, where someone asked for you; once per update.
+def snippet(body, n=100):
+    """The first words of a comment as a person reads it: no HTML comments, quoted lines or heading
+    marks, on one line."""
+    body = re.sub(r"<!--.*?-->", " ", body or "", flags=re.S)
+    text = " ".join(re.sub(r"^\s*#{1,6}\s+", "", line) for line in body.splitlines() if not line.lstrip().startswith(">"))
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[:n - 1].rstrip() + "…"
+
+
+UNKNOWN = "unknown"  # who_named_me could not look: never treat that as "nobody named you"
+TRUSTED = ("OWNER", "MEMBER", "COLLABORATOR")
+LOOKUPS_PER_RUN = 20  # ponytail: fixed cap; mention spam beyond it alerts as "someone mentioned you"
+
+
+def visible(body):
+    """What a reader sees: no HTML comments, quoted lines or code. A hidden @you does not name you."""
+    body = re.sub(r"<!--.*?-->|```.*?```|`[^`\n]*`", " ", body or "", flags=re.S)
+    return "\n".join(line for line in body.splitlines() if not line.lstrip().startswith(">"))
+
+
+def around(body, me, n=100):
+    """The words around the first @you, so the ask itself shows even after 100 characters of filler."""
+    text = snippet(body, 10 ** 6)
+    m = re.search(r"(?i)(?<![\w-])@" + re.escape(me) + r"(?![\w-])", text)
+    start = max(0, m.start() - 30) if m else 0
+    out = text[start:start + n]
+    return ("…" if start else "") + (out if start + n >= len(text) else out.rstrip() + "…")
+
+
+def who_named_me(n, me, since, budget):
+    """(login, comment-or-item, other logins) for the place in this notification's thread that @-names
+    you since `since`, preferring a maintainer's mention over anyone else's. None when nothing names
+    you; UNKNOWN when it could not fully look (a failed or capped lookup, a discussion, a PR whose
+    reviews it does not read, more comments than one page)."""
+    subject = n.get("subject") or {}
+    latest = subject.get("latest_comment_url") or ""
+    api = subject.get("url") or ""
+    thread = api.replace("https://api.github.com/", "").replace("/pulls/", "/issues/")
+    if not thread:
+        return UNKNOWN  # a discussion or release: nothing to read
+    if budget[0] <= 0:
+        return UNKNOWN
+    budget[0] -= 1
+    try:
+        found = []
+        if "/comments/" in latest:
+            found.append(github.gh_get(latest.replace("https://api.github.com/", "")))
+        # One page of comments since the last update this tool handled: a megathread is never read whole.
+        try:
+            page = github.gh_get(f"{thread}/comments", {"since": since, "per_page": 100}) or []
+        except github.GHError:
+            if not found:
+                raise
+            page = []  # the latest comment already answers who; the page only refines it
+        found += page
+        # Strictly newer than the last handled update: a mention already alerted is not found again.
+        newer = [c for c in found if _epoch(c.get("updated_at") or c.get("created_at") or "") > _epoch(since)]
+        named = [c for c in newer if mentions(visible(c.get("body")), me) and who(c) != me]
+        if named:
+            named.sort(key=lambda c: c.get("created_at") or "")
+            pick = next((c for c in reversed(named) if c.get("author_association") in TRUSTED), named[-1])
+            others = sorted({who(c) for c in named} - {who(pick)})
+            return who(pick), pick, others
+        if len(page) >= 100 or "/pulls/" in api:
+            return UNKNOWN  # more than one page, or a PR's reviews: never conclude nobody named you
+        # The body counts only when it is the news: new since `since`, or GitHub's latest event is the
+        # body itself. A megathread body that always named you does not vouch for every later post.
+        item = github.gh_get(thread)
+        fresh = latest.rstrip("/") == api.rstrip("/") or _epoch(item.get("created_at")) >= _epoch(since)
+        if fresh and mentions(visible(item.get("body")), me) and who(item) != me:
+            return who(item), item, []
+        if "/comments/" not in latest and not fresh:
+            return UNKNOWN  # GitHub did not say what changed (a body edit, say): do not conclude nobody
+    except github.GHError:
+        return UNKNOWN
+    return None
+
+
+def _epoch(iso):
+    try:
+        return calendar.timegm(time.strptime(iso or "", "%Y-%m-%dT%H:%M:%SZ"))
+    except ValueError:
+        return time.time()
+
+
+def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: ()):
+    """Unread notifications, any repo, where someone asked for you; once per update. Mentions say who
+    and what. On a quiet-title thread (a megathread) a mention alerts only when a comment really
+    names you: GitHub keeps calling every later post in a thread you were named in a "mention".
     Every id GitHub still returns goes into `live`, so pruning never forgets it."""
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - retention_days * 86400))
-    fresh = []
+    fresh, budget = [], [LOOKUPS_PER_RUN]
     for n in github.paginate("notifications", {"participating": "true", "since": since}, per_page=50):
         live.add(n["id"])
         if not repo_matches(n["repository"]["full_name"], repos) or n["reason"] not in ASKS or seen.get(n["id"]) == n["updated_at"]:
             continue
+        # Look at what happened since the last update of this thread that was handled, exactly; a
+        # thread seen for the first time is read back over the retention window.
+        prev = seen.get(n["id"]) or since
         seen[n["id"]] = n["updated_at"]
-        repo = n["repository"]["full_name"]
-        url = github.html_url((n.get("subject") or {}).get("url")) or n["repository"].get("html_url", "")
-        fresh.append({"kind": "notification", "key": repo, "title": f"{repo}: someone {ASKS[n['reason']]}",
-                      "message": n["subject"]["title"][:100], "url": url})
+        repo, subject = n["repository"]["full_name"], n.get("subject") or {}
+        title = subject.get("title") or ""
+        url = github.html_url(subject.get("url")) or n["repository"].get("html_url", "")
+        number = (subject.get("url") or "").rstrip("/").split("/")[-1]
+        # Only issues and PRs share the owner/repo#n space; a discussion or release #42 is not issue #42.
+        kind = subject.get("type") or ("PullRequest" if "/pulls/" in (subject.get("url") or "") else "Issue")
+        key = f"{repo}#{number}" if number.isdigit() and kind in ("Issue", "PullRequest") else f"{repo} {kind.lower()} {number}".strip()
+        verb = ASKS[n["reason"]]
+        named = who_named_me(n, me, prev, budget) if me and n["reason"] == "mention" else None
+        # Only a plain mention is filtered on a megathread, and only when we looked and nobody named
+        # you. Review requests, assignments and team mentions always alert; so does a failed lookup.
+        if n["reason"] == "mention" and named is None and any(r.search(title) for r in quiet(repo)):
+            continue
+        named = None if named == UNKNOWN else named
+        also = f" (also @{', @'.join(named[2])})" if named and named[2] else ""
+        message = (f"@{named[0]}{also} {verb}: \"{around(visible(named[1].get('body')), me)}\"" if named else f"someone {verb}")
+        fresh.append({"kind": "notification", "key": key, "title": f"{key} {title[:50]}", "message": message,
+                      "url": github.html_url((named[1].get("html_url") if named else "") or "") or url})
     return fresh
 
 

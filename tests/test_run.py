@@ -535,3 +535,22 @@ def test_the_quiet_run_really_sends_nothing(watch, monkeypatch, tmp_path):
     watch("run1", "--config", str(cfg), "--webhook", "", "--notify", "none")
     watch("run2", "--config", str(cfg), "--webhook", "", "--notify", "none")
     assert "webhook" not in sent and "stdout" in sent
+
+
+def test_a_notification_is_never_held_with_a_first_sight_alert(watch, fake):
+    """A new --extra item seeds quietly; the notification about it (an already-seeded source) still arrives."""
+    watch("run1")
+    fake.load("run2")
+    r = "repos/acme/widgets/issues/777"
+    fake.responses.update({
+        r: {"number": 777, "title": "New thing", "html_url": "https://github.com/acme/widgets/issues/777", "state": "open",
+            "comments": 1, "labels": [], "assignees": []},
+        f"{r}/comments?page=1&per_page=100": [{"id": 1, "user": {"login": "maint"}, "body": "/accept", "author_association": "OWNER"}],
+        f"{r}/timeline?page=1&per_page=100": [],
+        "notifications?page=1&participating=true&per_page=50&since=SINCE": [
+            {"id": "n777", "reason": "assign", "updated_at": "2026-10-03T00:00:00Z", "repository": {"full_name": "acme/widgets"},
+             "subject": {"title": "New thing", "url": "https://api.github.com/repos/acme/widgets/issues/777"}}]})
+    code, out, err = watch(None, "--extra", "acme/widgets#777")
+    assert any("acme/widgets#777" in line and "someone assigned you" in line for line in out), out
+    assert not any("acme/widgets#777" in line and "ACCEPTED" in line for line in out), \
+        "the first-sight gate on #777 is still held while the extra seeds"
