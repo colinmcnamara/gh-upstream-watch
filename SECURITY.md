@@ -46,3 +46,11 @@ uvx pypi-attestations verify pypi --repository https://github.com/colinmcnamara/
 ```
 
 A file signed by any other repository fails with "provenance was signed by repository ...".
+
+From 0.4.2 on, each GitHub Release also carries GitHub's signed build provenance for both files
+(`gh_upstream_watch-X.Y.Z.sigstore.json`), made in the build job before anything is tested or
+published. To check a downloaded file against it:
+
+```sh
+gh attestation verify gh_upstream_watch-X.Y.Z-py3-none-any.whl --repo colinmcnamara/gh-upstream-watch
+```
