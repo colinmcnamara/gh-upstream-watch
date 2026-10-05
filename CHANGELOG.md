@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.2] - 2026-10-04
+
+From a day of real use:
+
+- `done OWNER/REPO#N`: you handled what waits on you there (a thank-you mention, say). It leaves
+  `inbox` until a new reason, mention or review arrives.
+- Packs can name CI checks that are red by design (`ci_by_design`): such a failure waits on a
+  maintainer, not on you, and raises no `ci_failed`. The new bundled `vllm` pack lists
+  `pre-run-check`, red on a first-time contributor's PR until a maintainer starts CI.
+- Packs can quiet labels a bot flips back and forth (`quiet_labels`). semantic-router's
+  `pr/needs-review` and `pr/needs-rebase` flips no longer alert; the bot adding `pr/needs-rebase`
+  still does, once, as NEEDS REBASE.
+- `inbox` and `done` read your rule packs (local files), so a broken pack now stops them with the
+  same error `run` gives.
+
 ## [0.3.1] - 2026-10-04
 
 - `approvals`: list your own repos, and a workflow run waiting on an environment you can approve (a

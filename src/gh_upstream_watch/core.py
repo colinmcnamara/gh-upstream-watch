@@ -229,6 +229,17 @@ def repo_pace(repo):
     return {"days": round(days[len(days) // 2], 1), "p90": round(p90, 1), "n": len(days)}
 
 
+def ci_view(ci, by_design):
+    """(state, real failures, by-design failures) of a CI reading. A failure made only of checks a pack
+    says are red by design (until a maintainer acts) is "maintainer": waiting on them, not on you."""
+    ci = ci or {}
+    failing = ci.get("failing") or []
+    real = [f for f in failing if f not in by_design]
+    gated = [f for f in failing if f in by_design]
+    st = ci.get("state")
+    return ("maintainer" if st == "failure" and not real else st), real, gated
+
+
 def changes(old, new, me, rules):
     """[(kind, message, url or None)] for what changed. On first sight of an item (old None) only
     gates are evaluated, so an /accept already waiting alerts once; everything else seeds quietly."""
@@ -255,8 +266,9 @@ def changes(old, new, me, rules):
         out.append(("reopened", msg.get("reopened", "REOPENED"), None))
     elif old.get("state") != new["state"] and not (new.get("merged") and not old.get("merged")):
         out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
-    added = sorted(set(new["labels"]) - set(old.get("labels", [])))
-    removed = sorted(set(old.get("labels", [])) - set(new["labels"]))
+    loud = lambda labels: {x for x in labels if not any(r.search(x) for r in rules.get("quiet_labels", []))}  # noqa: E731
+    added = sorted(loud(new["labels"]) - loud(old.get("labels", [])))
+    removed = sorted(loud(old.get("labels", [])) - loud(new["labels"]))
     if added or removed:
         out.append(("labels", "labels: " + " ".join(["+" + x for x in added] + ["-" + x for x in removed]), None))
     if new.get("merged") and not old.get("merged"):
@@ -269,13 +281,16 @@ def changes(old, new, me, rules):
     # A recorded unknown (None) counts as "not a conflict before"; only a state from before 0.3.0 seeds.
     if new.get("conflict") and "conflict" in old and old["conflict"] is not True and new.get("author") == me:
         out.append(("conflict", "MERGE CONFLICT: rebase or merge main", None))
-    nci, oci = new.get("ci") or {}, old.get("ci") or {}
-    ci, was = nci.get("state"), oci.get("state")
+    nci, oci, bd = new.get("ci") or {}, old.get("ci") or {}, rules.get("ci_by_design", {})
+    (ci, real, gated), (was, was_real, was_gated) = ci_view(nci, bd), ci_view(oci, bd)
     # A state from before CI was recorded seeds quietly. A new failure on a new commit is news even
-    # when the last reading was already red.
-    if "ci" in old and (ci != was or ci == "failure" and (nci.get("sha"), nci.get("failing")) != (oci.get("sha"), oci.get("failing"))):
+    # when the last reading was already red; so is a newly gated check (the same gate on a new push is not).
+    if "ci" in old and (ci != was or ci == "failure" and (nci.get("sha"), real) != (oci.get("sha"), was_real)
+                        or ci == "maintainer" and set(gated) != set(was_gated)):
         if ci == "failure":
-            out.append(("ci_failed", "CI FAILED: " + ", ".join(new["ci"].get("failing", [])[:3]), None))
+            out.append(("ci_failed", "CI FAILED: " + ", ".join(real[:3]), None))
+        elif ci == "maintainer":
+            out.append(("ci_waiting", "CI waits for a maintainer: " + "; ".join(f"{g}: {bd[g]}" for g in gated), None))
         elif ci == "success":
             out.append(("ci_passed", "CI passed", None))
         elif ci == "approval":

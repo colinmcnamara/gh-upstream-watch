@@ -9,7 +9,8 @@ import re
 from pathlib import Path
 
 BUNDLED = Path(__file__).parent / "packs"
-KEYS = {"id", "description", "repos", "gates", "label_transitions", "quiet_titles", "messages", "claimable"}
+KEYS = {"id", "description", "repos", "gates", "label_transitions", "quiet_titles", "messages", "claimable",
+        "ci_by_design", "quiet_labels"}
 MESSAGE_KEYS = {"assigned", "reopened", "competing_pr", "reference"}
 CLAIMABLE_KEYS = {"search", "title", "comment_marker", "section", "row", "alert"}
 
@@ -50,7 +51,7 @@ def validate(pack, source):
         need(_strs(by.get("logins", [])) and _strs(by.get("associations", [])), f"{where}: logins and associations must be string lists")
         need(not set(by.get("associations", [])) - ASSOCIATIONS, f"{where}: unknown association in {by.get('associations')}")
 
-    c = {"gates": [], "quiet_titles": [], "row": None}
+    c = {"gates": [], "quiet_titles": [], "quiet_labels": [], "row": None}
     for g in pack.get("gates", []):
         need(isinstance(g, dict) and {"id", "comment", "authorized_by", "alert"} <= set(g),
              f"gate needs id, comment, authorized_by, alert: {g}")
@@ -66,6 +67,13 @@ def validate(pack, source):
         need(isinstance(t.get("assigned_to_me", False), bool), f"label_transition {t['id']}: assigned_to_me must be true or false")
     need(_strs(pack.get("quiet_titles", [])), "'quiet_titles' must be a list of regex strings")
     c["quiet_titles"] = [_regex(p, source) for p in pack.get("quiet_titles", [])]
+    # Checks that fail by design until a maintainer acts (a first-time contributor's gate), with why.
+    bd = pack.get("ci_by_design", {})
+    need(isinstance(bd, dict) and all(isinstance(k, str) and isinstance(v, str) for k, v in bd.items()),
+         "'ci_by_design' must map check names to the reason they are red by design")
+    # Labels a bot flips back and forth: changes to them alone do not alert (label rules still apply).
+    need(_strs(pack.get("quiet_labels", [])), "'quiet_labels' must be a list of regex strings")
+    c["quiet_labels"] = [_regex(p, source) for p in pack.get("quiet_labels", [])]
     msgs = pack.get("messages", {})
     need(isinstance(msgs, dict) and all(isinstance(v, str) for v in msgs.values()), "'messages' must map names to strings")
     need(not set(msgs) - MESSAGE_KEYS, f"unknown messages {sorted(set(msgs) - MESSAGE_KEYS)}")
@@ -118,6 +126,10 @@ def check(path):
         out.append(f"  label rule {t['id']}: has {t.get('has', [])}, lacks {t.get('lacks', [])}")
     for q in pack.get("quiet_titles", []):
         out.append(f"  quiet title `{q}`: alerts only on comments naming you")
+    for q in pack.get("quiet_labels", []):
+        out.append(f"  quiet label `{q}`: adding or removing it alone does not alert")
+    for name, why in pack.get("ci_by_design", {}).items():
+        out.append(f"  check `{name}`: {why}; counts as waiting on a maintainer, not on you")
     if pack.get("claimable"):
         out.append(f"  claim board `{pack['claimable']['title']}`: trusts {trust(pack['claimable'].get('authorized_by'))}")
     return out
@@ -127,12 +139,15 @@ def for_repo(packs, repo):
     """The effective rules for one repo: every matching pack merged, catch-all ('*') packs first."""
     hits = [p for p in packs if any(fnmatch.fnmatch(repo.lower(), g.lower()) for g in p["repos"])]
     hits.sort(key=lambda p: "*" not in p["repos"])
-    eff = {"ids": [], "gates": [], "label_transitions": [], "quiet_titles": [], "messages": {}, "claimable": None}
+    eff = {"ids": [], "gates": [], "label_transitions": [], "quiet_titles": [], "messages": {}, "claimable": None,
+           "ci_by_design": {}, "quiet_labels": []}
     for p in hits:
         eff["ids"].append(p["id"])
         eff["gates"] += [dict(g, _re=r, _then=t) for g, (r, t) in zip(p.get("gates", []), p["_c"]["gates"])]
         eff["label_transitions"] += p.get("label_transitions", [])
         eff["quiet_titles"] += p["_c"]["quiet_titles"]
+        eff["quiet_labels"] += p["_c"]["quiet_labels"]
+        eff["ci_by_design"].update(p.get("ci_by_design", {}))
         eff["messages"].update(p.get("messages", {}))
         if p.get("claimable"):
             eff["claimable"] = dict(p["claimable"], _row=p["_c"]["row"], _title=p["_c"]["claim_title"])

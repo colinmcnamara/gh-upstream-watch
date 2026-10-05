@@ -19,9 +19,15 @@
       "has": ["accepted"],
       "lacks": ["in-progress"],
       "alert": "IN-PROGRESS label missing: ask a maintainer once, in one line naming the cause"
+    },
+    {
+      "id": "needs-rebase",
+      "has": ["pr/needs-rebase"],
+      "alert": "NEEDS REBASE (the bot's label): merge main into the branch"
     }
   ],
   "quiet_titles": ["^\\[(WG|Community)\\]"],
+  "quiet_labels": ["^pr/needs-"],
   "messages": {
     "assigned": "ASSIGNED to you: implementation may start",
     "reopened": "REOPENED: comment /assign now",
