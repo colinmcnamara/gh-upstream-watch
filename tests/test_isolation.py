@@ -108,3 +108,16 @@ def test_a_wrapper_or_shell_flags_still_find_the_program():
     for argv in (["env", "-i", "FOO=1", "gh", "--version"], ["nohup", "gh", "--version"], ["bash", "-ec", "true; gh --version"]):
         with pytest.raises(RealSystemCall):
             subprocess.run(argv, capture_output=True)
+
+
+def test_shell_operators_do_not_hide_a_program():
+    """Codex docs fact-check: `true;gh` was one word to the guard."""
+    for code in ("true;gh --version", "true&&gh --version", "(gh --version)", "true|gh --version"):
+        with pytest.raises(RealSystemCall):
+            subprocess.run(["sh", "-c", code], capture_output=True)
+
+
+@needs_real
+def test_an_absolute_path_after_a_shell_operator_is_seen():
+    with pytest.raises(RealSystemCall):
+        subprocess.run(["sh", "-c", f"true;{REAL} version"], capture_output=True)

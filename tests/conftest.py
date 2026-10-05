@@ -1,6 +1,7 @@
 import inspect
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -42,10 +43,13 @@ WRAPPERS = {"env", "nohup", "nice", "command", "exec", "xargs"}  # each runs a l
 
 
 def _words(code):
+    """Shell code as words, split at `;`, `&&`, `|`, `(` too: `true;/usr/bin/gh` is two programs."""
+    lexer = shlex.shlex(code, posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
     try:
-        return shlex.split(code)
+        return list(lexer)
     except ValueError:  # an unbalanced quote in a script body: plain words are enough
-        return code.split()
+        return re.split(r"[\s;&|()<>]+", code)
 
 
 def _programs(args, shell=False):
