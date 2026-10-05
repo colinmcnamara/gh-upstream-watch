@@ -103,8 +103,12 @@ def test_a_certificate_error_is_not_offline(monkeypatch):
     assert github.wait_online(180) is True and net.slept == 0, "it never clears: the run reports it"
 
 
-def test_init_rejects_a_bad_interval(tmp_path):
+def test_init_rejects_a_bad_interval(tmp_path, monkeypatch):
+    installed = []
+    # never the real scheduler: on a regression this would replace the developer's launchd agent
+    monkeypatch.setattr(cli.schedule, "install", lambda a, **kw: installed.append(a) or 0)
     assert cli.main(["init", "--config", str(tmp_path / "c.json"), "--repos", R, "--schedule", "--interval", "0"]) == 2
+    assert installed == []
 
 
 def test_the_wait_stays_within_its_limit(monkeypatch):
