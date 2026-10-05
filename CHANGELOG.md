@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.0] - 2026-10-05
+
+Quality and supply chain:
+
+- **Python 3.10 or newer** (3.9 reached end of life in October 2025). On 3.9, install
+  `gh-upstream-watch<0.4`.
+- Releases carry PEP 740 attestations: PyPI shows each file's signed provenance from this
+  repository's release workflow. The TestPyPI smoke test now runs in a job that holds no publishing
+  token, and the release tests the exact wheel it publishes.
+- A failed webhook delivery (a redirect or a 5xx) no longer leaks its socket.
+- The gh extension says plainly when `python3` is older than 3.10 (stock macOS has 3.9).
+- Tests refuse to run the real `gh`, `launchctl`, `systemctl`, notifiers or `claude` through
+  `subprocess` or `os.system`, with tripwires for child processes, and run with a temporary home
+  directory and no GitHub credentials (limits in CONTRIBUTING). Strict pytest (warnings are
+  errors, a 30s timeout), a branch-coverage floor, mypy, a wider ruff rule set, workflow linting
+  with zizmor, CodeQL (GitHub's code-scanning default setup), contract tests on real GitHub reply
+  shapes, and tests against the built wheel and sdist. See CONTRIBUTING, "Quality gates".
+
 ## [0.3.3] - 2026-10-05
 
 For a laptop that sleeps:

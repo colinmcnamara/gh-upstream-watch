@@ -1,0 +1,33 @@
+{
+  "number": 14404,
+  "title": "Branch delete fails on owner case mismatch",
+  "html_url": "https://github.com/acme/widgets/issues/14404",
+  "state": "closed",
+  "closed_at": "2026-09-11T15:55:42Z",
+  "created_at": "2026-09-09T03:10:49Z",
+  "comments": 4,
+  "author_association": "NONE",
+  "user": {
+    "login": "hubot"
+  },
+  "labels": [
+    {
+      "id": 1593484620,
+      "name": "bug"
+    },
+    {
+      "id": 1825076873,
+      "name": "priority-3"
+    },
+    {
+      "id": 5976529142,
+      "name": "gh-pr"
+    }
+  ],
+  "assignees": [
+    {
+      "login": "octocat"
+    }
+  ],
+  "body": "Steps to reproduce: merge with --delete-branch. cc @octocat"
+}

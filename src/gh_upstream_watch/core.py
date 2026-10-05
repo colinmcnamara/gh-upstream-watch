@@ -3,6 +3,7 @@ import calendar
 import fnmatch
 import re
 import time
+from typing import Any
 
 from . import github
 from .packs import authorized, parse_claimable
@@ -62,7 +63,8 @@ def closes(body, src_repo, repo, n):
     """True when body says it closes repo#n, including later items in a list ("Closes #5, #6").
     A bare #n means the source's own repo."""
     body = body or ""
-    for m in CLOSE_RE.finditer(body):
+    for first in CLOSE_RE.finditer(body):
+        m: re.Match[str] | None = first
         while m:
             if (m.group(1) or m.group(2) or src_repo).lower() == repo.lower() and int(m.group(3)) == n:
                 return True
@@ -86,7 +88,7 @@ def discover(repo, me, recent_days, now):
 
 def cross_refs(repo, n, me):
     """[url, 'pr'|'issue', author, closes] for each item by someone else that references repo#n."""
-    refs = {}
+    refs: dict[str, Any] = {}
     for ev in github.paginate(f"repos/{repo}/issues/{n}/timeline"):
         src = (ev.get("source") or {}).get("issue") or {}
         if ev.get("event") != "cross-referenced" or not src or who(src) == me:
@@ -181,7 +183,7 @@ def ci_status(repo, sha):
     """{"state": failure|approval|pending|success, "failing": names, "sha": sha} for a commit, or None when no CI
     ran. "approval" is GitHub Actions waiting for a maintainer to approve a fork's workflow runs.
     Any failed call (a 404 can be a token without access) raises: CI unknown, never "passed"."""
-    checks = []
+    checks: list[dict[str, Any]] = []
     for page in range(1, github.MAX_PAGES + 1):
         r = github.gh_get(f"repos/{repo}/commits/{sha}/check-runs", {"per_page": 100, "page": page})
         checks += r.get("check_runs") or []
@@ -285,8 +287,8 @@ def changes(old, new, me, rules):
     (ci, real, gated), (was, was_real, was_gated) = ci_view(nci, bd), ci_view(oci, bd)
     # A state from before CI was recorded seeds quietly. A new failure on a new commit is news even
     # when the last reading was already red; so is a newly gated check (the same gate on a new push is not).
-    if "ci" in old and (ci != was or ci == "failure" and (nci.get("sha"), real) != (oci.get("sha"), was_real)
-                        or ci == "maintainer" and set(gated) != set(was_gated)):
+    if "ci" in old and (ci != was or (ci == "failure" and (nci.get("sha"), real) != (oci.get("sha"), was_real))
+                        or (ci == "maintainer" and set(gated) != set(was_gated))):
         if ci == "failure":
             out.append(("ci_failed", "CI FAILED: " + ", ".join(real[:3]), None))
         elif ci == "maintainer":

@@ -149,8 +149,8 @@ def migrate_v0(old, now, claim_repo="unknown/unknown"):
     # v0 keyed claimable rows by bare number; v1 keys are repo-qualified. The v0 claim board lived
     # in one repo, passed as claim_repo, so rows keep their identity instead of re-alerting.
     st["claimable"]["seen"] = {f"{claim_repo}#{k}": now for k in claim.get("seen", {})}
-    for key, fp in old.items():
-        fp = dict(fp)
+    for key, v0 in old.items():
+        fp = dict(v0)
         accepted, asked = fp.pop("accepted", False), fp.pop("assign_asked", False)
         fp["gates"] = {"accept": {"by": "", "done": bool(asked)}} if accepted else {}
         st["items"][key] = fp

@@ -2,6 +2,7 @@
 import http.server
 import json
 import os
+import socketserver
 import stat
 import threading
 
@@ -12,6 +13,15 @@ from test_extras import CFG, T, reply
 from gh_upstream_watch import cli, notify, packs, slack, state
 
 ALERT = {"time": "t", "title": "acme/widgets#1", "message": "m", "url": "https://github.com/acme/widgets/issues/1"}
+
+
+class LocalServer(http.server.HTTPServer):
+    """HTTPServer without its reverse-DNS lookup of the host (socket.getfqdn), which can hang for
+    30 seconds on a Mac: found by the test timeout as a test that sometimes took 35s."""
+
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = "127.0.0.1", self.server_address[1]
 
 
 @pytest.fixture
@@ -38,10 +48,11 @@ def server():
         def log_message(self, *a):
             pass
 
-    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    srv = LocalServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{srv.server_port}", hits
     srv.shutdown()
+    srv.server_close()
 
 
 def test_webhook_needs_2xx_and_never_follows_a_redirect(server, capsys):
@@ -103,12 +114,13 @@ def test_python_dash_m_and_an_escaped_plist(tmp_path):
     import sys
     from pathlib import Path
     src = Path(__file__).resolve().parents[1] / "src"
-    r = subprocess.run([sys.executable, "-m", "gh_upstream_watch", "--version"], capture_output=True, text=True,
-                       env={**os.environ, "PYTHONPATH": str(src)})
+    # Under scripts/test-wheel.sh, sys.executable is the wheel's venv: test the installed package.
+    env = dict(os.environ) if os.environ.get("GH_UPSTREAM_WATCH_TEST_INSTALLED") else {**os.environ, "PYTHONPATH": str(src)}
+    r = subprocess.run([sys.executable, "-m", "gh_upstream_watch", "--version"], capture_output=True, text=True, env=env)
     assert r.returncode == 0 and "gh-upstream-watch" in r.stdout
     cfg = tmp_path / "a&b.json"
     r = subprocess.run([sys.executable, "-m", "gh_upstream_watch", "--print-plist", "--config", str(cfg)],
-                       capture_output=True, text=True, env={**os.environ, "PYTHONPATH": str(src)})
+                       capture_output=True, text=True, env=env)
     assert "a&amp;b.json" in r.stdout and "a&b.json" not in r.stdout
 
 

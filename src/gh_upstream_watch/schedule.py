@@ -72,9 +72,10 @@ def printers(a):
 PLIST = "Library/LaunchAgents/local.gh-upstream-watch.plist"
 
 
-def install(a, run=subprocess.run):
+def install(a, run=None):
     """Write and load the scheduler for this machine: launchd on macOS, a systemd user timer where
     systemctl exists, otherwise print the cron line to add by hand."""
+    run = run or subprocess.run
     r = render(a)
     if sys.platform == "darwin":
         p = Path.home() / PLIST
@@ -97,8 +98,9 @@ def install(a, run=subprocess.run):
     return 0
 
 
-def describe(run=subprocess.run):
+def describe(run=None):
     """Whether this machine's scheduler has the job, for status."""
+    run = run or subprocess.run
     if sys.platform == "darwin":
         p = Path.home() / PLIST
         if not p.exists():

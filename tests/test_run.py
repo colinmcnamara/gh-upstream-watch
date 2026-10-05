@@ -111,11 +111,11 @@ def test_failed_destination_stays_in_the_outbox(watch, monkeypatch):
     """Item 4: stdout counts as delivered; a failed desktop notifier is retried next run, alone."""
     watch("run1")
     monkeypatch.setenv("GH_UPSTREAM_WATCH_NOTIFY", "/no/such/notifier")
-    code, out, err = watch("run2", "--notify", "command")
+    _, out, err = watch("run2", "--notify", "command")
     assert out == GOLDEN and "will retry next run" in err
     assert {tuple(e["pending"]) for e in watch.state()["outbox"]} == {("desktop",)}
     monkeypatch.setenv("GH_UPSTREAM_WATCH_NOTIFY", "true")
-    code, out, err = watch("run2", "--notify", "command")
+    _code, out, err = watch("run2", "--notify", "command")
     assert out == [] and watch.state()["outbox"] == [], "retried without re-printing to stdout"
 
 
@@ -123,7 +123,7 @@ def test_missing_gh_and_missing_repos_explain_the_next_step(tmp_path, monkeypatc
     """Item 14."""
     monkeypatch.setenv("GH_UPSTREAM_WATCH_GH", str(tmp_path / "no-gh"))
     assert cli.main(["--state", str(tmp_path / "s.json"), "--repos", "acme/widgets"]) == 1
-    assert "https://cli.github.com" in capsys.readouterr().err
+    assert "gh (the GitHub CLI) was not found: install it" in capsys.readouterr().err
     assert cli.main(["--state", str(tmp_path / "s.json")]) == 2
     assert "init --repos" in capsys.readouterr().err
     assert cli.main(["--state", str(tmp_path / "s.json"), "--repos", "owner/repo"]) == 2
@@ -160,14 +160,14 @@ def test_crash_between_outbox_write_and_notify_redelivers(watch, monkeypatch):
 def test_corrupt_state_reseeds_quietly(watch):
     watch("run1")
     watch.path.write_text('{"schema": 1, "items": {"acme/wid')
-    code, out, err = watch("run2")
+    _code, out, err = watch("run2")
     assert out == [] and "re-seeding quietly" in err
 
 
 def test_dry_run_saves_nothing(watch):
     watch("run1")
     before = watch.path.read_text()
-    code, out, _ = watch("run2", "--dry-run")
+    _code, out, _ = watch("run2", "--dry-run")
     assert out == GOLDEN and watch.path.read_text() == before
 
 
@@ -197,13 +197,15 @@ def test_migrated_v0_state_does_not_reseed(watch, tmp_path):
     v0 = tmp_path / "v0.json"
     v0.write_text((FIXTURES / "state_v0.json").read_text())
     assert cli.main(["migrate", "--from", str(v0), "--state", str(watch.path), "--claim-repo", "acme/widgets"]) == 0
-    code, out, err = watch("run2")
+    _code, out, err = watch("run2")
     assert "seed run" not in err
     assert "acme/widgets#390 Widget spins forever on an empty config: ACCEPTED by @maint: comment /assign now " \
            "(https://github.com/acme/widgets/issues/390)" in out
     assert not [line for line in out if "Flaky test" in line], "a notification seen by v0 stays seen"
 
 
+@pytest.mark.skipif(bool(os.environ.get("GH_UPSTREAM_WATCH_TEST_INSTALLED")),
+                    reason="the gh extension runs the checkout's src/, not the wheel")
 def test_gh_extension_shim_end_to_end(tmp_path):
     """The real CLI through the shim, with tests/fake_gh.py as the gh binary: the README demo."""
     env = dict(os.environ, GH_UPSTREAM_WATCH_GH=str(ROOT / "tests" / "fake_gh.py"), XDG_CONFIG_HOME=str(tmp_path))
@@ -214,6 +216,14 @@ def test_gh_extension_shim_end_to_end(tmp_path):
         p = subprocess.run(args, env=env, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
     assert [re.sub(r"^\[[^\]]+\] ", "", line) for line in p.stdout.splitlines()] == GOLDEN
+
+
+def test_the_gh_extension_shim_names_the_python_it_needs():
+    """Opus review: stock macOS python3 is 3.9, where 0.4 fails with a cryptic zip() error."""
+    shim = (ROOT / "gh-upstream-watch").read_text()
+    code = "import sys; sys.version_info = (3, 9, 6); sys.argv = ['gh-upstream-watch']; exec(compile(sys.stdin.read(), 'shim', 'exec'))"
+    p = subprocess.run([sys.executable, "-c", code], input=shim, capture_output=True, text=True)
+    assert p.returncode == 1 and "needs Python 3.10 or newer" in p.stderr and "--pin v0.3.3" in p.stderr
 
 
 # --- red-team round 2 (v0.1.1) -----------------------------------------------------------------
@@ -579,7 +589,7 @@ def test_a_notification_is_never_held_with_a_first_sight_alert(watch, fake):
         "notifications?page=1&participating=true&per_page=50&since=SINCE": [
             {"id": "n777", "reason": "assign", "updated_at": "2026-10-03T00:00:00Z", "repository": {"full_name": "acme/widgets"},
              "subject": {"title": "New thing", "url": "https://api.github.com/repos/acme/widgets/issues/777"}}]})
-    code, out, err = watch(None, "--extra", "acme/widgets#777")
+    _code, out, _err = watch(None, "--extra", "acme/widgets#777")
     assert any("acme/widgets#777" in line and "someone assigned you" in line for line in out), out
     assert not any("acme/widgets#777" in line and "ACCEPTED" in line for line in out), \
         "the first-sight gate on #777 is still held while the extra seeds"

@@ -221,8 +221,10 @@ def test_print_helpers(capsys):
     assert "*/15 * * * * mkdir -p $HOME/.local/state/gh-upstream-watch &&" in cron, "item 15: the log dir exists"
 
 
-def test_init_and_status(tmp_path, capsys, fake):
+def test_init_and_status(tmp_path, capsys, fake, monkeypatch):
     """Item 14: init fills the login from gh; status is a doctor."""
+    from conftest import ROOT
+    monkeypatch.setenv("GH_UPSTREAM_WATCH_GH", str(ROOT / "tests" / "fake_gh.py"))  # found on disk, not your real gh
     fake.load("run1")
     cfg = tmp_path / "config.json"
     assert cli.main(["init", "--config", str(cfg), "--repos", "acme/widgets"]) == 0
@@ -253,6 +255,7 @@ def test_bundled_gate_trusts_owner_and_collaborator_only():
 def test_contributing_prow_example_works():
     """Item 16: the worked example in CONTRIBUTING.md is a valid pack and fires as documented."""
     import re
+
     from conftest import ROOT
     block = re.search(r"```json\n(\{\n  \"id\": \"kubernetes-prow\".*?)```", (ROOT / "CONTRIBUTING.md").read_text(), re.S).group(1)
     rules = packs.for_repo([packs.validate(json.loads(block), "CONTRIBUTING.md")], "kubernetes/test-infra")
@@ -260,7 +263,7 @@ def test_contributing_prow_example_works():
     fp = {"title": "x", "url": "https://github.com/kubernetes/test-infra/pull/1", "state": "open", "assignees": [],
           "human_comments": 0, "labels": ["lgtm"]}
     ready = dict(fp, labels=["approved", "lgtm"])
-    assert [m for _, m, _ in core.changes(fp, ready, "octocat", rules)][0].startswith("LGTM + APPROVED")
+    assert next(m for _, m, _ in core.changes(fp, ready, "octocat", rules)).startswith("LGTM + APPROVED")
     held = dict(fp, labels=["approved", "do-not-merge/hold", "lgtm"])
     assert "HOLD placed" in " ".join(m for _, m, _ in core.changes(ready, held, "octocat", rules))
     cancelled = dict(fp, labels=["approved"])
@@ -271,6 +274,7 @@ def test_personal_data_gate_allows_only_the_repo_slug(tmp_path):
     """Item 5."""
     import shutil
     import subprocess
+
     from conftest import ROOT
     (tmp_path / "scripts").mkdir()
     shutil.copy(ROOT / "scripts" / "check-personal-data.sh", tmp_path / "scripts")
@@ -290,7 +294,9 @@ def test_personal_data_gate_allows_only_the_repo_slug(tmp_path):
 
 def test_version_is_single_valued():
     import re
+
     from conftest import ROOT
+
     from gh_upstream_watch import __version__
     assert re.search(r'^version = "(.*)"', (ROOT / "pyproject.toml").read_text(), re.M).group(1) == __version__
 

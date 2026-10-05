@@ -43,7 +43,7 @@ def gh_binary():
 
 def _run(argv, timeout=TIMEOUT):
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise GHError(f"{argv[4]}: {e}")
     if proc.returncode != 0:

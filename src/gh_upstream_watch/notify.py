@@ -8,6 +8,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -70,7 +71,7 @@ def desktop_argv(backend, alert):
         return ["notify-send", "--app-name=gh-upstream-watch", "--", title, html.escape(f"{msg}\n{url}")]
     if backend == "osascript":
         # osascript cannot open a link on click, so the URL stays in the text you can see.
-        return OSASCRIPT + [title, f"{msg} {url}"]
+        return [*OSASCRIPT, title, f"{msg} {url}"]
     return None
 
 
@@ -92,10 +93,15 @@ def send_one(dest, alert, backend="none", as_json=False, webhook=None):
             # Slack-style webhooks render <!channel> and <url|label>: escape so commenter text stays text.
             safe = text(alert).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             body = json.dumps({"text": safe, "alert": alert}).encode()
-            req = urllib.request.Request(webhook, data=body, headers={"Content-Type": "application/json"})
-            with _OPENER.open(req, timeout=10) as r:
-                if not 200 <= r.status < 300:
-                    raise OSError(f"webhook answered {r.status}")
+            # webhook_ok() admitted only https, or http on localhost, at config load
+            req = urllib.request.Request(webhook, data=body, headers={"Content-Type": "application/json"})  # noqa: S310
+            try:
+                with _OPENER.open(req, timeout=10) as r:
+                    if not 200 <= r.status < 300:
+                        raise OSError(f"webhook answered {r.status}")
+            except urllib.error.HTTPError as e:
+                e.close()  # a redirect or 5xx still holds the response open: close it, never leak a socket
+                raise OSError(f"webhook answered {e.code}") from None
         return True
     except Exception as e:  # a broken notifier must not lose the run
         print(f"notify: {dest}{' (' + backend + ')' if dest == 'desktop' else ''} failed, will retry next run: {e}",

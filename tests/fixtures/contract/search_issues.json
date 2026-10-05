@@ -1,0 +1,32 @@
+{
+  "total_count": 2,
+  "incomplete_results": false,
+  "items": [
+    {
+      "number": 14495,
+      "title": "Widget bug 14495",
+      "html_url": "https://github.com/acme/widgets/issues/14495",
+      "state": "closed",
+      "created_at": "2026-09-22T09:07:23Z",
+      "closed_at": "2026-09-25T07:51:37Z",
+      "author_association": "NONE",
+      "comments": 4,
+      "user": {
+        "login": "octocat"
+      }
+    },
+    {
+      "number": 14404,
+      "title": "Widget bug 14404",
+      "html_url": "https://github.com/acme/widgets/issues/14404",
+      "state": "closed",
+      "created_at": "2026-09-09T03:10:49Z",
+      "closed_at": "2026-09-11T15:55:42Z",
+      "author_association": "NONE",
+      "comments": 4,
+      "user": {
+        "login": "hubot"
+      }
+    }
+  ]
+}
