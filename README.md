@@ -10,7 +10,7 @@ acme/widgets#388 Document the retry flag: REOPENED: claim it
 ```
 
 `uv tool install gh-upstream-watch && gh-upstream-watch init --repos OWNER/REPO --schedule` and it
-runs every 30 minutes from then on.
+runs every 15 minutes from then on.
 
 If you contribute to projects you do not maintain, the important events are easy to miss in the
 notification stream: a maintainer accepts your proposal and now expects you to claim it, someone
@@ -113,6 +113,14 @@ systemctl --user daemon-reload && systemctl --user enable --now gh-upstream-watc
 gh-upstream-watch --print-cron
 ```
 
+Laptops sleep. Scheduled runs pass `--wait-network 180`: right after wake they wait up to three
+minutes for GitHub to answer, and if it never does, the run is skipped with one `offline:` log
+line and nothing in the state changes, so nothing is called unknown. On macOS, an interval that
+divides 60 uses launchd calendar slots (`:00`, `:15`, `:30`, `:45` by default), and a slot missed during sleep
+runs once on wake. The systemd timer and cron run within one interval of wake.
+A gap loses nothing within `recent_closed_days` (14): the next run reads notifications and
+changes since the last one. After a longer gap, an item opened and closed meanwhile can be missed.
+
 What one pass checks:
 
 - every open issue and PR in `repos` you are involved in (author, assignee, commenter, mentioned),
@@ -140,10 +148,11 @@ changes requested since your last reply), then what waits on them: your own open
 waited, when a maintainer last touched it, and how long 9 in 10 of the repo's last 100 merged PRs
 took from open to merge (refreshed daily), so you can see when it is still too early to nudge.
 
-If a source stays unknown for `escalate_after_runs` runs in a row (6, about three hours at the
-default interval), one real alert goes out through your notifiers, with the fix when there is a known
+If a source stays unknown for `escalate_after_hours` (3 by default, at any run interval; two runs
+at least, so one blip never alerts), one real alert goes out through your notifiers, with the fix when there is a known
 one (for example `gh auth refresh -s notifications`), since a scheduled job's stderr is easy to
-miss. It does not repeat until that source has recovered and failed again.
+miss. It does not repeat until that source has recovered and failed again. An older config's
+`escalate_after_runs` still works: it alerts after that many failing runs in a row instead.
 
 Exit status: 0 when every check completed, 1 when something was unknown this run (logged as
 `unknown this run`; `gh` missing or signed out also lands here, with the fix printed), 2 for a
@@ -173,7 +182,7 @@ command line, then environment (`GH_UPSTREAM_WATCH_CONFIG`, `GH_UPSTREAM_WATCH_R
   "notification_repos": null,
   "login": "octocat",
   "bots": [],
-  "escalate_after_runs": 6,
+  "escalate_after_hours": 3,
   "approvals": [],
   "slack": {"enabled": false}
 }

@@ -10,8 +10,7 @@
   <array>
 ${program_args}
   </array>
-  <key>StartInterval</key>
-  <integer>${interval_seconds}</integer>
+${trigger}
   <key>RunAtLoad</key>
   <true/>
   <key>EnvironmentVariables</key>

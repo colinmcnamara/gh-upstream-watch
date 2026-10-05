@@ -215,10 +215,10 @@ def test_bad_arguments_are_rejected(argv):
 def test_print_helpers(capsys):
     assert cli.main(["--print-plist", "--interval", "15"]) == 0
     out = capsys.readouterr().out
-    assert "<integer>900</integer>" in out and "<string>--once</string>" in out
-    assert cli.main(["--print-systemd"]) == 0 and "OnUnitActiveSec=30min" in capsys.readouterr().out
+    assert "<key>Minute</key><integer>45</integer>" in out and "<string>--once</string>" in out
+    assert cli.main(["--print-systemd"]) == 0 and "OnUnitActiveSec=15min" in capsys.readouterr().out
     cron = (cli.main(["--print-cron"]), capsys.readouterr().out)[1]
-    assert "*/30 * * * * mkdir -p $HOME/.local/state/gh-upstream-watch &&" in cron, "item 15: the log dir exists"
+    assert "*/15 * * * * mkdir -p $HOME/.local/state/gh-upstream-watch &&" in cron, "item 15: the log dir exists"
 
 
 def test_init_and_status(tmp_path, capsys, fake):
