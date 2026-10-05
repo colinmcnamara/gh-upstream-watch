@@ -83,7 +83,7 @@ def test_hook_failures_yield_nothing(tmp_path, monkeypatch):
     assert hooks.run(make_hook(tmp_path, "print(json.dumps({'no_message': 1}))"), {}) is None
     monkeypatch.setattr(hooks, "TIMEOUT", 0.5)
     assert hooks.run(make_hook(tmp_path, "import time; time.sleep(5)"), {}) is None
-    with pytest.raises(SystemExit):
+    with pytest.raises(ValueError, match="absolute path"):
         hooks.check("relative/hook")
 
 

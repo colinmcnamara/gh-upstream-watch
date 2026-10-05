@@ -10,6 +10,10 @@ import time
 SCHEMA = 1
 
 
+class NewerState(Exception):
+    """The state file is from a newer version. Not corrupt: never quarantined, the user upgrades."""
+
+
 class Locked(Exception):
     pass
 
@@ -36,7 +40,7 @@ def load(path):
         if not isinstance(data["schema"], int):
             raise ValueError("schema is not a number")
         if data["schema"] > SCHEMA:
-            raise SystemExit(f"state: {path} has schema {data['schema']}; this version reads {SCHEMA}. Upgrade.")
+            raise NewerState(f"state: {path} has schema {data['schema']}; this version reads {SCHEMA}. Upgrade.")
         st = {**empty(), **data}
         # Valid JSON in the wrong shape (a hand edit, a bad restore) would crash every run: quarantine it too.
         for k, v in empty().items():

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+Exit codes that match the README, from fact-checking the docs against the code:
+
+- A bad `--hook` path (relative, or not executable) exits 2, a config error, instead of 1. If a
+  script checks for 1 here, change it to 2.
+- `migrate` with a missing or unreadable `--from` file exits 2 with a message, not a traceback.
+- A state file from a newer version exits 2 and stays where it is (it is never moved aside).
+- `migrate` writes the state file under the same lock a run holds: while a run is in progress it
+  exits 3 and writes nothing.
+- `init --schedule` on a machine with neither launchd nor systemd refuses an `--interval` cron
+  cannot run (one that does not divide 60). `--interval`'s help now says `init --schedule` uses it.
+
 ## [0.4.0] - 2026-10-05
 
 Quality and supply chain:
