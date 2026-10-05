@@ -72,7 +72,7 @@ def build_parser():
     ap.add_argument("--print-plist", action="store_true", help="print a launchd agent and exit")
     ap.add_argument("--print-systemd", action="store_true", help="print a systemd user service + timer and exit")
     ap.add_argument("--print-cron", action="store_true", help="print a crontab line and exit")
-    ap.add_argument("--interval", type=int, default=15, help="minutes between runs, for the --print-* helpers")
+    ap.add_argument("--interval", type=int, default=15, help="minutes between runs, for init --schedule and the --print-* helpers (default 15)")
     return ap
 
 
@@ -236,7 +236,10 @@ def run(cfg, a, now=None):
     now = now or time.time()
     rule_packs = packs.load([config_dir() / "packs", *cfg["packs_dirs"]])
     if cfg["hook"]:
-        hooks.check(cfg["hook"])
+        try:
+            hooks.check(cfg["hook"])
+        except ValueError as e:
+            raise ConfigError(str(e)) from None
     backend = "none" if a.dry_run else notify.resolve(cfg["notify"])
     webhook = None if a.dry_run else cfg["webhook"]
     dests = notify.destinations(backend, webhook)
@@ -729,11 +732,17 @@ def migrate(cfg, a):
     dest = cfg["state"]
     if os.path.exists(dest) and not a.force:
         raise ConfigError(f"{dest} exists; use --force to overwrite")
-    v0 = json.loads(Path(a.from_path).expanduser().read_text())
+    try:
+        v0 = json.loads(Path(a.from_path).expanduser().read_text())
+    except (OSError, ValueError) as e:
+        raise ConfigError(f"cannot read {a.from_path}: {e}") from None
     if "schema" in v0:
         raise ConfigError(f"{a.from_path} is already schema {v0['schema']}")
-    st = state.migrate_v0(v0, time.time(), a.claim_repo)
-    state.save(dest, st)
+    with state.lock(dest):  # the same lock a run holds: never write under a running pass
+        if os.path.exists(dest) and not a.force:  # a run may have created it meanwhile
+            raise ConfigError(f"{dest} exists; use --force to overwrite")
+        st = state.migrate_v0(v0, time.time(), a.claim_repo)
+        state.save(dest, st)
     print(f"migrated {len(st['items'])} items, {len(st['notifications']['seen'])} notification ids, "
           f"{len(st['claimable']['seen'])} claim rows, {len(st['slack'].get('seen', {}))} Slack ids -> {dest}")
     # Same config and repos as this command, and every notifier off (a webhook too) for the quiet run.
@@ -778,7 +787,7 @@ def main(argv=None):
     except state.Locked as e:
         log(f"skipped: {e}")
         return 3
-    except (packs.PackError, ConfigError) as e:
+    except (packs.PackError, ConfigError, state.NewerState) as e:
         log(f"error: {e}")
         return 2
 

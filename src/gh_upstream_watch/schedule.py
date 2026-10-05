@@ -94,6 +94,10 @@ def install(a, run=None):
         run(["systemctl", "--user", "enable", "--now", "gh-upstream-watch.timer"], check=True, capture_output=True)
         print(f"scheduled every {a.interval} min: {d}/gh-upstream-watch.timer (enabled; logs: journalctl --user -u gh-upstream-watch)")
     else:
+        if not (1 <= a.interval < 60 and 60 % a.interval == 0):
+            print("error: no launchd or systemd here, and cron needs an --interval that divides 60 "
+                  "(1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30)", file=sys.stderr)
+            return 2
         print("no launchd or systemd here; add this line with `crontab -e`:\n" + r["cron"], end="")
     return 0
 

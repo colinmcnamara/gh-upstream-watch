@@ -13,10 +13,11 @@ TIMEOUT = 30
 
 
 def check(path):
+    """Raises ValueError, which the CLI reports as a config error (exit 2)."""
     if not os.path.isabs(path):
-        raise SystemExit(f"--hook must be an absolute path: {path}")
+        raise ValueError(f"--hook must be an absolute path: {path}")
     if not os.access(path, os.X_OK):
-        raise SystemExit(f"--hook is not executable: {path}")
+        raise ValueError(f"--hook is not executable: {path}")
 
 
 def run(path, payload):

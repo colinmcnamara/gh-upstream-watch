@@ -38,8 +38,9 @@ def test_corrupt_or_partial_state_is_quarantined_and_reseeded(tmp_path, junk, ca
 def test_newer_schema_is_refused(tmp_path):
     p = tmp_path / "state.json"
     p.write_text(json.dumps({"schema": 99}))
-    with pytest.raises(SystemExit):
+    with pytest.raises(state.NewerState, match="Upgrade"):
         state.load(str(p))
+    assert json.loads(p.read_text()) == {"schema": 99}, "kept, not quarantined"
 
 
 def test_prune_after_retention_keeps_live_ids():
