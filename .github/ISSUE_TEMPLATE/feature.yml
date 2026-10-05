@@ -1,0 +1,24 @@
+name: Feature request
+description: Something the watcher should notice or tell you.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The tool stays read-only, stdlib only, one pass per run (CONTRIBUTING, "Out of scope").
+        A project's own command workflow is usually a rule pack: there is a template for that.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you missed, or had to check by hand
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like it to say or do
+      description: An example alert line helps.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you tried instead (a hook, a pack, a setting)

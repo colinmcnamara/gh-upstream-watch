@@ -1,5 +1,11 @@
 # gh-upstream-watch
 
+[![PyPI](https://img.shields.io/pypi/v/gh-upstream-watch)](https://pypi.org/project/gh-upstream-watch/)
+[![Python](https://img.shields.io/pypi/pyversions/gh-upstream-watch)](https://pypi.org/project/gh-upstream-watch/)
+[![CI](https://github.com/colinmcnamara/gh-upstream-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/colinmcnamara/gh-upstream-watch/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/colinmcnamara/gh-upstream-watch/badge)](https://scorecard.dev/viewer/?uri=github.com/colinmcnamara/gh-upstream-watch)
+[![License: MIT](https://img.shields.io/pypi/l/gh-upstream-watch)](https://github.com/colinmcnamara/gh-upstream-watch/blob/main/LICENSE)
+
 Read-only alerts for your upstream work: tells you the next action when a maintainer gate, a
 competing PR, or a review moves.
 
@@ -399,6 +405,21 @@ one finds references the old one never saw. To keep that history from arriving a
    on anything new.
 3. `gh-upstream-watch --dry-run` should now be as quiet as the old job.
 4. Unload the old job and `gh-upstream-watch init --schedule`.
+
+## Status and support
+
+- **Beta, one maintainer.** Issues and pull requests are welcome; expect an answer within a week.
+  Questions and bugs go to [issues](https://github.com/colinmcnamara/gh-upstream-watch/issues),
+  vulnerabilities to private reporting
+  ([SECURITY](https://github.com/colinmcnamara/gh-upstream-watch/blob/main/SECURITY.md)).
+- **No telemetry.** The tool sends nothing anywhere except your own `gh` calls (reads only) and the
+  notifiers, webhook, hook or Slack check you configure.
+- **Versioning.** Semantic versioning. Until 1.0, a minor version may change behavior, and the
+  CHANGELOG says how; the `--json` fields are stable within `"v": 1`. Only the latest release gets
+  fixes.
+
+Contributions follow [CONTRIBUTING](https://github.com/colinmcnamara/gh-upstream-watch/blob/main/CONTRIBUTING.md)
+and the [Code of Conduct](https://github.com/colinmcnamara/gh-upstream-watch/blob/main/CODE_OF_CONDUCT.md).
 
 ## License
 

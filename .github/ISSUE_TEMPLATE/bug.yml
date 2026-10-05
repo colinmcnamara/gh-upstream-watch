@@ -1,0 +1,50 @@
+name: Bug report
+description: Something gh-upstream-watch did that it should not have, or did not do.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please remove anything private from what you paste: repo names,
+        logins, issue titles and Slack ids from your own work.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `gh-upstream-watch --version`.
+      placeholder: gh-upstream-watch 0.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [macOS, Linux, Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options: [uv tool install, pipx, gh extension, other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+      description: The alert you got (or did not get), and the GitHub event behind it.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Output of `gh-upstream-watch status`
+      description: It shows what the last run could not check, with the fix when one is known.
+      render: text
+  - type: textarea
+    id: explain
+    attributes:
+      label: Output of `gh-upstream-watch explain OWNER/REPO#N` for the item, if there is one
+      description: What the tool sees for that item and what it would alert.
+      render: text

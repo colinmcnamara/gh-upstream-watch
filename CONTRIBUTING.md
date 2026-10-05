@@ -1,6 +1,8 @@
 # Contributing
 
-Small and boring is the goal: stdlib only, Python 3.10+, one pass per run, read-only.
+Small and boring is the goal: stdlib only, Python 3.10+, one pass per run, read-only. Everyone
+taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md). Issues use the templates (bug,
+feature, rule pack); vulnerabilities go to private reporting, as [SECURITY](SECURITY.md) says.
 
 ```sh
 uv sync                          # dev tools from uv.lock; the package has no runtime deps
@@ -65,6 +67,12 @@ newest supported Python; the personal-data gate, the lock check, gitleaks and zi
 - **Workflows** pin every action to a commit SHA, give each job only the permissions it needs, and
   are linted by zizmor. Dependabot updates the pinned actions and the dev tools weekly, taking a
   release only once it is a week old.
+
+An outside view: the OpenSSF Scorecard workflow (`scorecard.yml`) scores the repository weekly and
+on every push to `main`, for the README badge. Some checks cannot pass with one maintainer, and
+that is expected: Code-Review and the review part of Branch-Protection (a maintainer's own PRs merge
+without a second reviewer, after the required CI checks), and Fuzzing (none; the inputs are
+GitHub's JSON, covered by contract fixtures).
 
 Occasional, by hand: `uvx mutmut run` on `core.py` to find assertions that do not really check,
 and `uv run --with pytest-randomly pytest -p randomly` to find tests that depend on order. Hypothesis is a candidate if a
@@ -131,6 +139,16 @@ wrong type.
 Alerts carry a source while a run is in progress. `state.hold_until_seeded` holds an alert until its
 source is seeded, except `live` (a change against a saved baseline) and `slack` (which seeds
 itself). A change to seeding belongs there, with a unit test in `tests/test_state.py`.
+
+## Toward 1.0
+
+1.0 means the interfaces below are promises, changed only in a major version:
+
+- the commands and flags, and the exit codes in the README;
+- the config keys and their meaning;
+- the `--json` and webhook fields (`"v": 1`);
+- the rule pack schema;
+- and 30 days of everyday use with no fix release.
 
 ## Releasing (maintainers)
 
