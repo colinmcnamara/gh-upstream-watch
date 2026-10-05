@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.2] - 2026-10-05
 
 - Each GitHub Release carries signed build provenance for the wheel and sdist
   (`gh_upstream_watch-X.Y.Z.sigstore.json`; check a file with `gh attestation verify FILE --repo

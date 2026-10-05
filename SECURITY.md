@@ -41,8 +41,8 @@ signed PEP 740 attestation tying each file to this repository's `release.yml` ru
 
 ```sh
 uvx pypi-attestations verify pypi --repository https://github.com/colinmcnamara/gh-upstream-watch \
-  pypi:gh_upstream_watch-0.4.1-py3-none-any.whl
-# OK: gh_upstream_watch-0.4.1-py3-none-any.whl
+  pypi:gh_upstream_watch-0.4.2-py3-none-any.whl
+# OK: gh_upstream_watch-0.4.2-py3-none-any.whl
 ```
 
 A file signed by any other repository fails with "provenance was signed by repository ...".
