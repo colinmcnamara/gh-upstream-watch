@@ -1,0 +1,26 @@
+name: Rule pack for a project
+description: Turn a project's maintainer commands (like /accept or /approve) into next-action alerts.
+labels: [rule-pack]
+body:
+  - type: input
+    id: repos
+    attributes:
+      label: Repositories
+      placeholder: owner/repo, or owner/*
+    validations:
+      required: true
+  - type: textarea
+    id: workflow
+    attributes:
+      label: The command workflow
+      description: |
+        Which comment or label moves things forward, who may post it, and what a contributor
+        should do next. Link the project's CONTRIBUTING or an example thread.
+    validations:
+      required: true
+  - type: checkboxes
+    id: pack
+    attributes:
+      label: Before opening
+      options:
+        - label: I read the rule pack schema in the README, and checked that no bundled pack covers this project.
