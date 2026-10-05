@@ -4,6 +4,7 @@
 [![Python](https://img.shields.io/pypi/pyversions/gh-upstream-watch)](https://pypi.org/project/gh-upstream-watch/)
 [![CI](https://github.com/colinmcnamara/gh-upstream-watch/actions/workflows/ci.yml/badge.svg)](https://github.com/colinmcnamara/gh-upstream-watch/actions/workflows/ci.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/colinmcnamara/gh-upstream-watch/badge)](https://scorecard.dev/viewer/?uri=github.com/colinmcnamara/gh-upstream-watch)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/15235/badge)](https://www.bestpractices.dev/projects/15235)
 [![License: MIT](https://img.shields.io/pypi/l/gh-upstream-watch)](https://github.com/colinmcnamara/gh-upstream-watch/blob/main/LICENSE)
 
 Read-only alerts for your upstream work: tells you the next action when a maintainer gate, a
