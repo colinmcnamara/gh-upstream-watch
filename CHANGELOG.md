@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2] - 2026-10-05
+
+- Each GitHub Release carries signed build provenance for the wheel and sdist
+  (`gh_upstream_watch-X.Y.Z.sigstore.json`; check a file with `gh attestation verify FILE --repo
+  colinmcnamara/gh-upstream-watch`). The release's tests now run in their own job, away from the
+  signing token. GitHub Releases are immutable from this release on.
+- The repository has a Code of Conduct, issue and PR templates, an OpenSSF Scorecard workflow and
+  badges, and a "Status and support" section in the README.
+
 ## [0.4.1] - 2026-10-05
 
 Exit codes that match the README, from fact-checking the docs against the code:

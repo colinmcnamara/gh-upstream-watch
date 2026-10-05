@@ -165,13 +165,16 @@ itself). A change to seeding belongs there, with a unit test in `tests/test_stat
    the "creations being restricted" notice a `git push` of a tag prints):
    `gh api --method POST repos/OWNER/REPO/git/refs -f ref=refs/tags/vX.Y.Z -f sha="$(git rev-parse HEAD)"`.
 4. `release.yml` checks that the tag matches both version sources and the CHANGELOG, builds once,
-   uploads the files, then runs the whole suite against the built wheel and runs the sdist. It
+   signs build provenance for both files (`actions/attest-build-provenance`), and uploads them.
+   A separate job with no signing or publishing token runs the whole suite against the built
+   wheel and runs the sdist. It
    publishes to TestPyPI by trusted publishing and installs and runs the package from there, in a
    job that holds no publishing token. Then the `pypi` job waits for a maintainer to approve the
    `pypi` environment (on the run's page, or through the REST API's pending-deployments
    endpoint). Uploads go through `pypa/gh-action-pypi-publish`, which attaches PEP 740
    attestations. PyPI's trusted publisher is pinned to environment `pypi` (TestPyPI's to
    `testpypi`), so no other job can publish. Last, it creates the GitHub Release from the
-   CHANGELOG section.
+   CHANGELOG section, with the files and the provenance bundle (`.sigstore.json`) attached.
+   Releases are immutable: once published, nothing in them can change.
 5. A failed release never moves a tag: fix forward with the next patch version.
 

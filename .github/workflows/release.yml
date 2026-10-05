@@ -19,6 +19,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write  # signs the build provenance (Sigstore); no test code runs in this job
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -37,23 +41,50 @@ jobs:
       - run: scripts/check-personal-data.sh
       - run: uv lock --check
       - run: uv build --clear
-      # dist/ and the notes are uploaded before any test code or test tool runs, so nothing they do
-      # can change what PyPI attests or what the GitHub Release says.
-      # A failing test below still stops the release: every later job needs this one.
+      # Signed provenance for both files: `gh attestation verify FILE --repo OWNER/REPO` checks it,
+      # and the bundle is attached to the GitHub Release.
+      - id: attest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*
+      - run: |
+          mkdir -p "$RUNNER_TEMP/release"
+          cp "$BUNDLE" "$RUNNER_TEMP/release/gh_upstream_watch-${GITHUB_REF_NAME#v}.sigstore.json"
+          mv "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/release/notes.md"
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
-      - run: mv "$RUNNER_TEMP/notes.md" "$RUNNER_TEMP/dist-notes.md"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: notes
-          path: ${{ runner.temp }}/dist-notes.md
+          name: release-extras
+          path: ${{ runner.temp }}/release/
+
+  # The tests get their own job: the build job can sign, and no test code or test tool should run
+  # next to that token. Every publishing job needs this one to pass.
+  test-dist:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.10.12"
+          enable-cache: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
       - name: The exact files we publish pass the whole suite, installed (wheel), and run on their own (sdist)
         run: scripts/test-wheel.sh 3.10
 
   testpypi:
-    needs: build
+    needs: [build, test-dist]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: testpypi
@@ -115,8 +146,10 @@ jobs:
           path: dist/
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: notes
-          path: notes/
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file notes/dist-notes.md
+          name: release-extras
+          path: extras/
+      # The package files plus the signed provenance bundle (`.sigstore.json`). Releases are
+      # immutable: gh uploads to a draft, then publishes, after which nothing can change.
+      - run: gh release create "$GITHUB_REF_NAME" dist/* extras/*.sigstore.json --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --notes-file extras/notes.md
         env:
           GH_TOKEN: ${{ github.token }}
