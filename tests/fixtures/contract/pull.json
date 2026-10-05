@@ -1,0 +1,15 @@
+{
+  "number": 14429,
+  "state": "closed",
+  "merged": true,
+  "draft": false,
+  "mergeable_state": "unknown",
+  "merged_at": "2026-09-11T15:55:40Z",
+  "head": {
+    "sha": "a9d9d84ee3e848f0e1ea97eaef837126d3a7d983",
+    "ref": "feature-branch"
+  },
+  "user": {
+    "login": "maint"
+  }
+}

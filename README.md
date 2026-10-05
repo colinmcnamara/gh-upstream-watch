@@ -64,14 +64,14 @@ transcript identical to it. Alerts that need you come first; information (here, 
 
 ## Install
 
-Requires the [GitHub CLI](https://cli.github.com) (`gh auth login` done) and Python 3.9 or newer.
+Requires the [GitHub CLI](https://cli.github.com) (`gh auth login` done) and Python 3.10 or newer (on 3.9, `pip install "gh-upstream-watch<0.4"`).
 No other dependencies.
 
 ```sh
 uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
-# or, as a gh extension (runs from a checkout with your python3):
+# or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
 gh extension install colinmcnamara/gh-upstream-watch --pin v0.1.1   # then: gh upstream-watch --help
 ```
 

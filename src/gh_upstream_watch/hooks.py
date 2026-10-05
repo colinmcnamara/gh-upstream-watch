@@ -23,7 +23,7 @@ def run(path, payload):
     """[(kind, message, url)] from the hook, or None when the hook failed (timeout, non-zero exit,
     a malformed line). None makes the item unknown for this run, so its state is not advanced."""
     try:
-        proc = subprocess.run([path], input=json.dumps(payload), capture_output=True, text=True, timeout=TIMEOUT)
+        proc = subprocess.run([path], input=json.dumps(payload), capture_output=True, text=True, timeout=TIMEOUT, check=False)
     except (OSError, subprocess.TimeoutExpired) as e:
         print(f"hook {path}: {e}", file=sys.stderr)
         return None

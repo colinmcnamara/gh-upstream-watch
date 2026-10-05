@@ -9,10 +9,11 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import __version__, core, github, hooks, notify, packs, schedule, slack, state
 
-DEFAULTS = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
+DEFAULTS: dict[str, Any] = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
             "packs_dirs": [], "claim_groups": [], "recent_closed_days": 14, "retention_days": 30,
             "baseline_days": 90, "notification_repos": None, "login": None, "bots": [], "slack": {"enabled": False},
             "escalate_after_hours": 3, "approvals": []}
@@ -135,7 +136,7 @@ def load_config(a):
         elif isinstance(default, dict):
             ok = isinstance(val, dict)
         elif key == "notification_repos":
-            ok = val is None or isinstance(val, list) and all(isinstance(x, str) for x in val)
+            ok = val is None or (isinstance(val, list) and all(isinstance(x, str) for x in val))
         else:
             ok = val is None or isinstance(val, str)
         if not ok:
@@ -148,10 +149,10 @@ def load_config(a):
         if r.count("/") != 1 or not all(r.split("/")):
             raise ConfigError(f"repo {r!r}: expected owner/repo")
     cfg["state"] = os.path.expanduser(cfg["state"] or default_state())
-    for e in cfg["extras"]:
-        repo, _, n = e.partition("#")
+    for x in cfg["extras"]:
+        repo, _, n = x.partition("#")
         if repo.count("/") != 1 or not n.isdigit():
-            raise ConfigError(f"--extra {e!r}: expected owner/repo#number")
+            raise ConfigError(f"--extra {x!r}: expected owner/repo#number")
     if cfg["webhook"] and not notify.webhook_ok(cfg["webhook"]):
         raise ConfigError("--webhook must be https:// (http:// only for localhost)")
     return cfg
@@ -167,7 +168,7 @@ def fold(alerts):
     """One alert per item per run: a notification about an item that also alerts this run joins that
     alert (who asked first, then what changed) instead of arriving as a second line. Runs on what is
     being sent, after seeding, so a notification is never held back with a first-sight alert."""
-    host = {}
+    host: dict[str, dict[str, Any]] = {}
     for al in alerts:
         if al["kind"] != "notification":
             host.setdefault(al["key"].lower(), al)
@@ -355,9 +356,9 @@ def run(cfg, a, now=None):
                 found_alerts += extra
             fp["_seen"] = now
             items[key] = fp
-            for kind, msg, url in found_alerts:
-                if kind == "milestone" and fp.get("author") == me and core.first_merge(repo, me, int(n)):
-                    msg = f"FIRST MERGE in {repo}: your PR is in"
+            for kind, raw, url in found_alerts:
+                first = kind == "milestone" and fp.get("author") == me and core.first_merge(repo, me, int(n))
+                msg = f"FIRST MERGE in {repo}: your PR is in" if first else raw
                 # Only first-sight alerts wait for seeding; a change against a saved baseline is always real.
                 src = "live" if key in old else source_of(key)
                 alerts.append((src, alert(now, kind, key, f"{key} {fp['title'][:50]}", msg, url or fp["url"])))
@@ -382,7 +383,7 @@ def run(cfg, a, now=None):
         note_repos = cfg["notification_repos"]
         if note_repos is None:
             note_repos = cfg["repos"] + [e.partition("#")[0] for e in cfg["extras"]]
-        seen, live = dict(st["notifications"]["seen"]), set()
+        seen, live = dict(st["notifications"]["seen"]), set[str]()
         try:
             alerts += [("notifications", alert(now, **x))
                        for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos, me,
@@ -395,7 +396,7 @@ def run(cfg, a, now=None):
             rules = packs.for_repo(rule_packs, repo)
             if not (rules["claimable"] and cfg["claim_groups"]):
                 continue
-            seen, rows = dict(st["claimable"]["seen"]), set()
+            seen, rows = dict(st["claimable"]["seen"]), set[str]()
             try:
                 alerts += [(f"claim:{repo}", alert(now, **x))
                            for x in core.claimable_asks(seen, repo, rules, cfg["claim_groups"], now, rows)]

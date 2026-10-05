@@ -9,7 +9,7 @@ description = "Read-only alerts for your upstream work: tells you the next actio
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 authors = [{ name = "Colin McNamara", email = "colin@2cups.com" }]
 dependencies = []
 keywords = ["github", "gh-extension", "open-source", "notifications", "maintainers"]
@@ -18,6 +18,13 @@ classifiers = [
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Development Status :: 4 - Beta",
   "Topic :: Software Development :: Version Control :: Git",
 ]
 
@@ -30,15 +37,53 @@ Changelog = "https://github.com/colinmcnamara/gh-upstream-watch/blob/main/CHANGE
 gh-upstream-watch = "gh_upstream_watch.cli:main"
 
 [dependency-groups]
-dev = ["pytest", "ruff"]
+dev = [
+    "coverage>=7.10.7",
+    "mypy>=1.19.1",
+    "pytest",
+    "pytest-timeout>=2.4.0",
+    "ruff",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
+xfail_strict = true
+filterwarnings = ["error"]
+timeout = 30
+
+[tool.coverage.run]
+branch = true
+source = ["gh_upstream_watch"]
+
+[tool.coverage.report]
+fail_under = 96  # a ratchet: raise it when coverage rises, never lower it
+show_missing = true
+skip_covered = true
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+strict_equality = true
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py310"
 line-length = 150
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "B", "UP"]
-ignore = ["B904"]
+select = ["E", "F", "W", "B", "UP", "I", "SIM", "RUF", "PT", "C4", "S", "PLE", "PLW"]
+ignore = [
+  "B904",   # `raise X from e` everywhere would add noise: our errors carry their cause in the message
+  "C408",   # dict(base, key=value) is the house style for "a copy with one field changed"
+  "PT006",  # parametrize names as one comma string reads better on one line
+  "PT018",  # one assert with a message per behavior is the house style
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The package runs gh, notifiers, hooks and the scheduler as argv lists, never through a shell.
+"src/gh_upstream_watch/{github,notify,hooks,slack,schedule}.py" = ["S603", "S607"]
+# Tests assert; run fakes and git; and carry control and look-alike characters as test data.
+"tests/**" = ["S101", "S108", "S603", "S607", "PLW1510", "PLE2502", "RUF001"]

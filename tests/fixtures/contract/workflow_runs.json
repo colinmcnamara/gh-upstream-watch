@@ -1,0 +1,25 @@
+{
+  "total_count": 2,
+  "workflow_runs": [
+    {
+      "id": 34618026802,
+      "name": "Code Scanning",
+      "head_sha": "a9d9d84ee3e848f0e1ea97eaef837126d3a7d983",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "head_branch": "feature-branch",
+      "html_url": "https://github.com/acme/widgets/actions/runs/34618026802"
+    },
+    {
+      "id": 34618026779,
+      "name": "Lint",
+      "head_sha": "a9d9d84ee3e848f0e1ea97eaef837126d3a7d983",
+      "status": "completed",
+      "conclusion": "success",
+      "run_attempt": 1,
+      "head_branch": "feature-branch",
+      "html_url": "https://github.com/acme/widgets/actions/runs/34618026779"
+    }
+  ]
+}

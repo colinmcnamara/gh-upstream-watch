@@ -19,10 +19,8 @@ def test_save_is_atomic_and_round_trips(tmp_path):
 
 def test_second_writer_is_refused(tmp_path):
     p = str(tmp_path / "state.json")
-    with state.lock(p):
-        with pytest.raises(state.Locked):
-            with state.lock(p):
-                pass
+    with state.lock(p), pytest.raises(state.Locked), state.lock(p):
+        pass
     with state.lock(p):  # released after the first run ends
         pass
 
@@ -83,7 +81,7 @@ A = {"title": "a"}
 
 
 def seeding(st, alerts, sources, failed=(), old=(), extras=()):
-    return state.hold_until_seeded(st, alerts, set(sources), set(failed), dict.fromkeys(old, {}), list(extras))
+    return state.hold_until_seeded(st, alerts, set(sources), set(failed), {k: {} for k in old}, list(extras))
 
 
 def test_a_new_state_holds_first_sight_and_seeds_what_completed():

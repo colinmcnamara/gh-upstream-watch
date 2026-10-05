@@ -1,0 +1,19 @@
+{
+  "total_count": 2,
+  "check_runs": [
+    {
+      "id": 103324930518,
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "a9d9d84ee3e848f0e1ea97eaef837126d3a7d983"
+    },
+    {
+      "id": 103324710134,
+      "name": "build (macos-latest)",
+      "status": "completed",
+      "conclusion": "success",
+      "head_sha": "a9d9d84ee3e848f0e1ea97eaef837126d3a7d983"
+    }
+  ]
+}

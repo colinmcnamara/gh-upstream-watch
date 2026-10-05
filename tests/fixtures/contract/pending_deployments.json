@@ -1,0 +1,20 @@
+[
+  {
+    "wait_timer": 30,
+    "wait_timer_started_at": "2020-11-23T22:00:40Z",
+    "current_user_can_approve": true,
+    "environment": {
+      "id": 161088068,
+      "name": "staging",
+      "html_url": "https://github.com/acme/widgets/deployments/activity_log?environments_filter=staging"
+    },
+    "reviewers": [
+      {
+        "type": "User",
+        "reviewer": {
+          "login": "octocat"
+        }
+      }
+    ]
+  }
+]

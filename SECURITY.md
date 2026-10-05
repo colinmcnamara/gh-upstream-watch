@@ -19,6 +19,13 @@
 - **State** (`~/.local/state/gh-upstream-watch/state.json`) holds issue titles, URLs, logins and
   seen ids. It is yours; nothing is sent anywhere except to the notifiers you configure.
 
+## Verifying a release
+
+Each release from 0.4.0 on is built once in GitHub Actions and published to PyPI by trusted
+publishing (no stored token), after a maintainer approves the `pypi` environment. PyPI keeps a
+signed PEP 740 attestation tying each file to this repository's `release.yml` run: see the file's
+"Provenance" on pypi.org, or `https://pypi.org/integrity/gh-upstream-watch/<version>/<file>/provenance`.
+
 ## Reporting a vulnerability
 
 Please use GitHub's private vulnerability reporting on this repository (Security tab, "Report a

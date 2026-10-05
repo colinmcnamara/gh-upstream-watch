@@ -1,0 +1,20 @@
+[
+  {
+    "id": 5178640828,
+    "state": "COMMENTED",
+    "submitted_at": "2026-09-11T12:31:38Z",
+    "author_association": "CONTRIBUTOR",
+    "user": {
+      "login": "reviewer-bot[bot]"
+    }
+  },
+  {
+    "id": 5180576519,
+    "state": "APPROVED",
+    "submitted_at": "2026-09-11T15:40:24Z",
+    "author_association": "MEMBER",
+    "user": {
+      "login": "maint"
+    }
+  }
+]

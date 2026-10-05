@@ -7,6 +7,7 @@ import fnmatch
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 BUNDLED = Path(__file__).parent / "packs"
 KEYS = {"id", "description", "repos", "gates", "label_transitions", "quiet_titles", "messages", "claimable",
@@ -51,7 +52,7 @@ def validate(pack, source):
         need(_strs(by.get("logins", [])) and _strs(by.get("associations", [])), f"{where}: logins and associations must be string lists")
         need(not set(by.get("associations", [])) - ASSOCIATIONS, f"{where}: unknown association in {by.get('associations')}")
 
-    c = {"gates": [], "quiet_titles": [], "quiet_labels": [], "row": None}
+    c: dict[str, Any] = {"gates": [], "quiet_titles": [], "quiet_labels": [], "row": None}
     for g in pack.get("gates", []):
         need(isinstance(g, dict) and {"id", "comment", "authorized_by", "alert"} <= set(g),
              f"gate needs id, comment, authorized_by, alert: {g}")
@@ -139,11 +140,11 @@ def for_repo(packs, repo):
     """The effective rules for one repo: every matching pack merged, catch-all ('*') packs first."""
     hits = [p for p in packs if any(fnmatch.fnmatch(repo.lower(), g.lower()) for g in p["repos"])]
     hits.sort(key=lambda p: "*" not in p["repos"])
-    eff = {"ids": [], "gates": [], "label_transitions": [], "quiet_titles": [], "messages": {}, "claimable": None,
+    eff: dict[str, Any] = {"ids": [], "gates": [], "label_transitions": [], "quiet_titles": [], "messages": {}, "claimable": None,
            "ci_by_design": {}, "quiet_labels": []}
     for p in hits:
         eff["ids"].append(p["id"])
-        eff["gates"] += [dict(g, _re=r, _then=t) for g, (r, t) in zip(p.get("gates", []), p["_c"]["gates"])]
+        eff["gates"] += [dict(g, _re=r, _then=t) for g, (r, t) in zip(p.get("gates", []), p["_c"]["gates"], strict=True)]
         eff["label_transitions"] += p.get("label_transitions", [])
         eff["quiet_titles"] += p["_c"]["quiet_titles"]
         eff["quiet_labels"] += p["_c"]["quiet_labels"]

@@ -184,7 +184,7 @@ def test_discover_encodes_search_with_f_q(fake):
         "search/issues?page=1&per_page=100&q=repo:acme/widgets involves:octocat is:closed updated:>=DATE":
             {"total_count": 2, "items": [{"number": 388}, {"number": 1}]}}
     assert core.discover("acme/widgets", ME, 14, 1.7e9) == {"acme/widgets#1", "acme/widgets#388"}
-    assert ["-f", "q=repo:acme/widgets involves:octocat is:open"] == fake.calls[0][-2:], "gh encodes the query, not us"
+    assert fake.calls[0][-2:] == ["-f", "q=repo:acme/widgets involves:octocat is:open"], "gh encodes the query, not us"
 
 
 def notification(nid, reason, updated):
@@ -236,7 +236,7 @@ def test_claimable_asks_repo_qualified_once(fake):
         f"repos/{repo}/issues/983/comments?page=1&per_page=100": [{"body": BOARD.replace("### Merged", PHISH + "\n### Merged"), **LEAD}]}
     seen = {}
     got = core.claimable_asks(seen, repo, SR, ["data-plane"], 1.7e9, set())
-    assert [(a["title"], a["key"]) for a in got][0] == ("CLAIMABLE in wg/data-plane: /assign now", "acme/widgets#613")
+    assert next((a["title"], a["key"]) for a in got) == ("CLAIMABLE in wg/data-plane: /assign now", "acme/widgets#613")
     assert got[1]["url"] == "https://github.com/acme/widgets/issues/983", "item 7: a non-GitHub link falls back to the board"
     assert core.claimable_asks(seen, repo, SR, ["data-plane"], 1.7e9, set()) == []
 

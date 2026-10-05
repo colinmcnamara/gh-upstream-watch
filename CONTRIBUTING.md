@@ -1,16 +1,59 @@
 # Contributing
 
-Small and boring is the goal: stdlib only, Python 3.9+, one pass per run, read-only.
+Small and boring is the goal: stdlib only, Python 3.10+, one pass per run, read-only.
 
 ```sh
-uv sync                          # dev tools (pytest, ruff) from uv.lock; the package has no runtime deps
+uv sync                          # dev tools from uv.lock; the package has no runtime deps
 uv run pytest -q
-uv run --python 3.9 pytest -q    # the supported floor
+uv run --python 3.10 pytest -q   # the supported floor
 uv run ruff check .
-uv build                         # sdist + wheel in dist/
+uv run mypy
+uv run coverage run -m pytest -q && uv run coverage report   # fails under the floor in pyproject.toml
+uv build --clear && scripts/test-wheel.sh   # the suite against the installed wheel; the sdist built and run
 scripts/check-personal-data.sh   # CI runs this too
 scripts/demo.sh                  # the README demo, on recorded fixtures
 ```
+
+## Quality gates
+
+CI runs the tests, coverage, ruff, mypy and the wheel tests on Linux and macOS, on the oldest and
+newest supported Python; the personal-data gate, the lock check, gitleaks and zizmor run once, on Linux:
+
+- **Tests are hermetic.** `tests/conftest.py` refuses any real `gh`, `launchctl`, `systemctl`,
+  `crontab`, desktop notifier or `claude`, by any word of the command, `executable=` or symlink
+  target, through `subprocess` (all of it goes through `Popen`) or `os.system`. It checks the words
+  that run as programs: argv[0], the program after `env` or `nohup`, and every word of shell code. The error is a
+  `RealSystemCall`, which no `except Exception` can swallow. A child process the tests start has
+  no guard, so tripwire stubs come first on its `PATH` (exit 97), and gh tokens are removed, so a
+  real `gh` reached any other way is signed out. `HOME` is a temp dir and `time.sleep` is instant.
+  It catches accidents; it is not a sandbox. Not covered: a command hidden in a shell variable, a
+  child process that runs a tool by absolute path or gets a `PATH` without the tripwire, and
+  `os.exec*`, `os.spawn*` or `os.posix_spawn` by absolute path. Nothing here does those. A test
+  that needs a tool uses a fake: the `fake` fixture, a runner argument, or a script in its
+  `tmp_path`. `tests/test_isolation.py` proves each layer with probes that are harmless even if
+  the guard breaks.
+- **pytest is strict:** unknown markers and config are errors, an unexpected xpass fails, any
+  warning is an error (it found a leaked socket), and every test has a 30s timeout (it found a
+  test server that hung on a reverse-DNS lookup).
+- **Branch coverage** has a floor (`fail_under` in `pyproject.toml`). It is a ratchet: raise it
+  when coverage rises, never lower it.
+- **ruff** with bugbear, pyupgrade, isort, simplify, ruff, pytest-style, comprehensions, bandit
+  and pylint errors and warnings; each ignored rule says why in `pyproject.toml`. `ruff format`
+  is not used: adopting it would rewrite about 1,500 lines for no behavior change.
+- **mypy** checks the bodies of untyped functions; tighten it module by module.
+- **What users install is tested,** not just `src/`: the whole suite runs against the installed
+  wheel, and the sdist is installed and run on its own. A release uploads the built files and its
+  notes before any test code runs, then publishes exactly those files, only if the tests pass.
+- **Contract fixtures** (`tests/fixtures/contract/`) are real GitHub API replies captured once from
+  public repos (GitHub's own documented examples for the private ones: notifications and pending
+  deployments), trimmed, with synthetic names. They keep the parsers honest against real shapes,
+  not hand-made ones. They do not notice GitHub changing later: recapture them when it does.
+- **Workflows** pin every action to a commit SHA, give each job only the permissions it needs, and
+  are linted by zizmor. Dependabot updates the pinned actions and the dev tools weekly.
+
+Occasional, by hand: `uvx mutmut run` on `core.py` to find assertions that do not really check,
+and `uv run pytest -p randomly` to find tests that depend on order. Hypothesis is a candidate if a
+real parser grows.
 
 Tests never touch the network. `tests/fake_gh.py` replays a JSON fixture of
 `"path?sorted&params": response` pairs and refuses any call that is not a GET; the `fake`
@@ -75,12 +118,14 @@ from the network, email. A pack for another project's command workflow is a welc
    match), and add a dated `## [X.Y.Z] - YYYY-MM-DD` section to `CHANGELOG.md`. Date it before the
    PR, so the merge needs no extra commit.
 2. Open the PR. `main` requires a PR and the five CI checks (`hygiene` and the four `test (...)`
-   jobs), squash only. `gh pr merge N --squash --auto` merges when they pass.
+   jobs: Linux and macOS on Python 3.10 and 3.14), squash only. `gh pr merge N --squash --auto` merges when they pass.
 3. Tag the merged commit `vX.Y.Z` and push the tag. The `release tags` ruleset protects `v*`; the
    push may print "creations being restricted" while it applies the maintainer bypass, and the
    tag is still created.
 4. `release.yml` checks that the tag matches both version sources and the CHANGELOG, builds once,
-   publishes to TestPyPI by trusted publishing, and installs and runs it from there. Then the
+   runs the whole suite against the built wheel, publishes to TestPyPI by trusted publishing, and
+   installs and runs it from there in a separate job that holds no publishing token. Uploads go
+   through `pypa/gh-action-pypi-publish`, which attaches PEP 740 attestations. Then the
    `pypi` job waits for a maintainer to approve the `pypi` environment (in the run's page, or
    through the REST API's pending-deployments endpoint). Configure PyPI's trusted publisher with
    environment `pypi` (and TestPyPI's with `testpypi`), so no other job can publish. After approval it publishes to PyPI and creates the
