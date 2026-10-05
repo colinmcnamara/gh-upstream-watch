@@ -5,6 +5,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:  # wait a week before taking a new release: time for a compromised one to be caught
+      default-days: 7
     groups:
       actions:
         patterns: ["*"]
@@ -13,6 +15,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:  # wait a week before taking a new release: time for a compromised one to be caught
+      default-days: 7
     groups:
       dev-tools:
         patterns: ["*"]

@@ -49,7 +49,8 @@ newest supported Python; the personal-data gate, the lock check, gitleaks and zi
   deployments), trimmed, with synthetic names. They keep the parsers honest against real shapes,
   not hand-made ones. They do not notice GitHub changing later: recapture them when it does.
 - **Workflows** pin every action to a commit SHA, give each job only the permissions it needs, and
-  are linted by zizmor. Dependabot updates the pinned actions and the dev tools weekly.
+  are linted by zizmor. Dependabot updates the pinned actions and the dev tools weekly, taking a
+  release only once it is a week old.
 
 Occasional, by hand: `uvx mutmut run` on `core.py` to find assertions that do not really check,
 and `uv run pytest -p randomly` to find tests that depend on order. Hypothesis is a candidate if a
