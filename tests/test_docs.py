@@ -30,12 +30,29 @@ def test_every_readme_command_parses():
         parser.parse_args(argv)  # SystemExit on an unknown flag or command
 
 
-def test_readme_config_keys_are_real():
-    configs = [json.loads(body) for lang, body in BLOCKS if lang == "json" and '"retention_days"' in body]
-    assert configs, "the README shows a config"
-    for c in configs:
-        assert set(c) <= set(cli.DEFAULTS), set(c) - set(cli.DEFAULTS)
-    assert set(cli.DEFAULTS) <= set(configs[0]), f"undocumented keys: {set(cli.DEFAULTS) - set(configs[0])}"
+def test_readme_config_table_matches_the_code():
+    """Every key in the Configuration table, with its default, exactly as the code has them."""
+    section = README.split("## Configuration", 1)[1].split("\n## ", 1)[0]
+    rows = dict(re.findall(r"^\| `(\w+)` \| `([^`]*)` \|", section, re.M))
+    assert set(rows) == set(cli.DEFAULTS), set(rows) ^ set(cli.DEFAULTS)
+    for key, default in rows.items():
+        assert json.loads(default) == cli.DEFAULTS[key], key
+
+
+def test_readme_pack_example_is_a_valid_pack():
+    from gh_upstream_watch import packs
+    examples = [json.loads(body) for lang, body in BLOCKS if lang == "json" and '"gates"' in body]
+    assert examples
+    for p in examples:
+        packs.validate(p, "README")
+
+
+def test_version_pins_in_the_docs_are_current():
+    """The gh extension pin and the release-verification example name the current version."""
+    from gh_upstream_watch import __version__ as v
+    security = (Path(__file__).resolve().parents[1] / "SECURITY.md").read_text()
+    assert f"--pin v{v} " in README
+    assert f"pypi:gh_upstream_watch-{v}-py3-none-any.whl" in security
 
 
 def test_readme_demo_matches_the_golden_run():
