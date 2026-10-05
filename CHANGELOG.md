@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] - 2026-10-05
 
 Exit codes that match the README, from fact-checking the docs against the code:
 
