@@ -86,6 +86,7 @@ gh-upstream-watch --dry-run                       # one pass, print only, save n
 gh-upstream-watch                                 # one pass: alerts, then save state
 gh-upstream-watch status                          # what the state file knows, and how to fix what failed
 gh-upstream-watch inbox                           # whose move it is on each open item (--json for scripts)
+gh-upstream-watch done acme/widgets#390           # handled: off your inbox until something new happens
 gh-upstream-watch explain acme/widgets#390        # what the tool sees for one item, and what it would alert
 gh-upstream-watch forget acme/widgets#390         # stop watching an item (it seeds again if search finds it)
 ```
@@ -222,8 +223,10 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 Packs are local JSON data, loaded from the bundled `packs/`, then
 `~/.config/gh-upstream-watch/packs/`, then any `--packs-dir`. A pack with the same `id` replaces
 an earlier one. Packs are never read from a watched repository: the repo you are watching must not
-be able to decide what you are told. Bundled: `generic` (wording for every repo) and
-`vllm-semantic-router` (the `/accept` then `/assign` flow of `vllm-project/semantic-router`).
+be able to decide what you are told. Bundled: `generic` (wording for every repo),
+`vllm-semantic-router` (the `/accept` then `/assign` flow of `vllm-project/semantic-router`; its
+`pr/needs-*` label flips are quiet, but the bot adding `pr/needs-rebase` alerts) and `vllm` (`pre-run-check` is red by design on a first-time
+contributor's PR).
 
 ```json
 {
@@ -240,6 +243,8 @@ be able to decide what you are told. Bundled: `generic` (wording for every repo)
   "label_transitions": [{"id": "stuck", "assigned_to_me": true, "has": ["accepted"], "lacks": ["in-progress"],
                          "alert": "in-progress label missing"}],
   "quiet_titles": ["^\\[Community\\]"],
+  "quiet_labels": ["^pr/needs-"],
+  "ci_by_design": {"pre-run-check": "red until a maintainer starts CI"},
   "messages": {"reopened": "REOPENED: claim it",
                "competing_pr": "COMPETING PR #{number} (by @{author}) says Closes #{target}: check scope"}
 }
@@ -252,7 +257,10 @@ read-only access. Author association alone cannot prove who may run a gate, so a
 maintainers' logins to your copy of a pack when you know them. On first sight of an item, gates
 are checked too: an `/accept` already waiting alerts once. `then` is your own follow-up command; once
 you have posted it after the gate comment, the alert drops the call to action. `quiet_titles` apply
-only when the title was quiet before the change as well, so renaming an issue cannot silence it. See `CONTRIBUTING.md` for the full schema and how to add a pack with a fixture.
+only when the title was quiet before the change as well, so renaming an issue cannot silence it.
+`quiet_labels` are labels a bot flips back and forth: adding or removing them alone does not alert
+(label rules still see them). `ci_by_design` names checks that fail on purpose until a maintainer
+acts; such a failure is "CI waits for a maintainer", under waiting on them, not `ci_failed`. See `CONTRIBUTING.md` for the full schema and how to add a pack with a fixture.
 
 For anything a pack cannot express, `--hook /abs/path` runs your program once per
 watched item that has a previous fingerprint (no shell, 30 s timeout) with `{"key", "repo", "number", "me", "old", "new"}` on

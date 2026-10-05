@@ -31,6 +31,8 @@ No real people, handles, Slack ids or local paths; the personal-data gate fails 
    | `gates` | `{id, comment, authorized_by: {associations, logins}, alert, then?, alert_done?}`; `comment` must start with `^`; a non-empty `logins` wins over `associations`; `{actor}` in alerts |
    | `label_transitions` | `{id, alert, has?, lacks?, assigned_to_me?}`: alerts when the condition becomes true |
    | `quiet_titles` | regexes; matching items alert on comments only when they `@`-name you |
+   | `quiet_labels` | regexes; adding or removing only these labels does not alert (label rules still apply) |
+   | `ci_by_design` | `{check name: why}`: checks red by design until a maintainer acts; such a failure waits on them, not `ci_failed` |
    | `messages` | wording for `assigned`, `reopened`, `competing_pr`, `reference` (`{number}`, `{author}`, `{kind}`, `{target}`) |
    | `claimable` | `{search, title, comment_marker, section, row, alert, authorized_by?}`: a claim-board issue; `row` needs named groups `number`, `title`, `url`; `{group}` in `comment_marker` and `alert`; only a board and rows by authors `authorized_by` trusts are read (default OWNER, COLLABORATOR) |
 

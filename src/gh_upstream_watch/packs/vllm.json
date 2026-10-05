@@ -1,0 +1,8 @@
+{
+  "id": "vllm",
+  "description": "vllm-project/vllm: pre-run-check is red by design on a first-time contributor's PR until a maintainer starts CI; it waits on them, not on you.",
+  "repos": ["vllm-project/vllm"],
+  "ci_by_design": {
+    "pre-run-check": "red by design on a first-time contributor's PR until a maintainer starts CI"
+  }
+}

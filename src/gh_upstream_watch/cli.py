@@ -35,13 +35,15 @@ def build_parser():
         prog="gh-upstream-watch",
         description="Read-only alerts for your upstream work: tells you the next action when a maintainer "
                     "gate, a competing PR, or a review moves. Every GitHub call is a GET.")
-    ap.add_argument("command", nargs="?", default="run", choices=["run", "status", "inbox", "init", "migrate", "forget", "explain", "check-pack"],
+    ap.add_argument("command", nargs="?", default="run",
+                    choices=["run", "status", "inbox", "done", "init", "migrate", "forget", "explain", "check-pack"],
                     help="run (default): one pass; status: summarize the state file; inbox: what waits on you "
-                         "and on them, from the last run; init: write a starter "
+                         "and on them, from the last run; done KEY...: you handled what waits on you there (it "
+                         "returns when something new happens); init: write a starter "
                          "config; migrate: convert a v0 state file (--from) into --state; forget KEY...: drop "
                          "items from the state; explain KEY: show what the tool sees for one item and why; check-pack FILE...: "
                          "validate rule packs and say what they do")
-    ap.add_argument("keys", nargs="*", metavar="OWNER/REPO#N", help="forget/explain: the items; check-pack: the files")
+    ap.add_argument("keys", nargs="*", metavar="OWNER/REPO#N", help="forget/explain/done: the items; check-pack: the files")
     ap.add_argument("--version", action="version", version=f"gh-upstream-watch {__version__}")
     ap.add_argument("--config", help="JSON config file (default: $XDG_CONFIG_HOME/gh-upstream-watch/config.json)")
     ap.add_argument("--state", help="state file (default: $XDG_STATE_HOME/gh-upstream-watch/state.json)")
@@ -327,6 +329,8 @@ def run(cfg, a, now=None):
             if fp.get("conflict") is None and key in old:
                 fp["conflict"] = old[key].get("conflict")  # GitHub still computing: keep the last answer
             found_alerts = core.changes(old.get(key), fp, me, rules)
+            if found_alerts:  # something new happened: a `done` on this item no longer covers it
+                st.get("done", {}).pop(key, None)
             if cfg["hook"] and key in old:
                 extra = hooks.run(cfg["hook"], {"key": key, "repo": repo, "number": int(n), "me": me, "old": old[key], "new": fp})
                 if extra is None:
@@ -408,6 +412,7 @@ def run(cfg, a, now=None):
                 log(f"slack: unknown this run (failure {st['slack']['failures']}): {e}")
 
         st["items"], st["last_unknown"], st["retry"] = items, unknowns, retry
+        st["done"] = {k: v for k, v in st.get("done", {}).items() if k in items}  # forget items no longer watched
         # Slack seeds itself and "live" alerts diff a saved baseline; every other source seeds on its
         # first complete run.
         sources = ({f"repo:{r}" for r in cfg["repos"]} | {f"extra:{e}" for e in cfg["extras"]} | {"notifications"}
@@ -518,29 +523,42 @@ def _days(iso, now):
     return (now - core._epoch(iso)) / 86400 if iso else None
 
 
-def inbox_rows(st, me, now):
+def _you_reasons(fp, me, by_design):
+    """What waits on you on one item, as a list of reasons (empty: nothing)."""
+    why = [f"ACCEPTED by @{g['by']}: your move" for g in fp.get("gates", {}).values() if not g.get("done") and not g.get("bot")]
+    if fp.get("mention_at") and fp["mention_at"] > (fp.get("my_at") or ""):  # ISO 8601 UTC sorts as time
+        why.append("unanswered mention")
+    if fp.get("author") == me:
+        state, real, _ = core.ci_view(fp.get("ci"), by_design)
+        if state == "failure":
+            why.append("CI FAILED: " + ", ".join(real[:3]))
+        if fp.get("conflict"):
+            why.append("merge conflict")
+        if fp.get("draft"):
+            why.append("draft: mark it ready for review")
+        cr = fp.get("changes_requested")
+        if cr and (fp.get("my_at") or "") < cr["at"]:  # ISO 8601 UTC strings sort as times
+            why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
+    return why
+
+
+def _handled(fp, why, done):
+    """`done` covers these reasons: no reason is new since, and no mention or review arrived after it."""
+    return bool(done) and set(why) <= set(done.get("why", [])) and all(
+        (t or "") <= done.get("at", "") for t in (fp.get("mention_at"), (fp.get("changes_requested") or {}).get("at")))
+
+
+def inbox_rows(st, me, now, by_design=lambda repo: {}):
     """[(section, key, title, why, url)] from the saved state: what waits on you, what waits on them
-    (your own open work, with this repo's pace), and rows the claim boards list now."""
+    (your own open work, with this repo's pace), and rows the claim boards list now. `by_design`
+    gives a repo's checks that are red by design (from its packs)."""
     rows = []
     for key, fp in sorted(st["items"].items()):
         if fp.get("state") != "open":
             continue
-        mine, why = fp.get("author") == me, []
-        why += [f"ACCEPTED by @{g['by']}: your move" for g in fp.get("gates", {}).values() if not g.get("done") and not g.get("bot")]
-        if fp.get("mention_at") and fp["mention_at"] > (fp.get("my_at") or ""):  # ISO 8601 UTC sorts as time
-            why.append("unanswered mention")
-        if mine:
-            ci = fp.get("ci") or {}
-            if ci.get("state") == "failure":
-                why.append("CI FAILED: " + ", ".join(ci.get("failing", [])[:3]))
-            if fp.get("conflict"):
-                why.append("merge conflict")
-            if fp.get("draft"):
-                why.append("draft: mark it ready for review")
-            cr = fp.get("changes_requested")
-            if cr and (fp.get("my_at") or "") < cr["at"]:  # ISO 8601 UTC strings sort as times
-                why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
-        if why:
+        mine, bd = fp.get("author") == me, by_design(key.partition("#")[0])
+        why = _you_reasons(fp, me, bd)
+        if why and not _handled(fp, why, st.get("done", {}).get(key)):
             rows.append(("you", key, fp.get("title", ""), "; ".join(why), fp.get("url", "")))
             continue
         if not mine:
@@ -551,8 +569,11 @@ def inbox_rows(st, me, now):
         pace = st.get("pace", {}).get(key.partition("#")[0], {}).get("p90") if fp.get("pr") else None  # merge pace: PRs only
         days = lambda d: core.plural(int(d), "day")  # noqa: E731
         text = f"waiting {days(waited)}; " + (f"last maintainer touch {days(touch)} ago" if touch is not None else "no maintainer touch yet")
-        if (fp.get("ci") or {}).get("state") == "approval":
+        ci_state, _, gated = core.ci_view(fp.get("ci"), bd)
+        if ci_state == "approval":
             text += "; CI waits for a maintainer to approve the workflow runs"
+        elif ci_state == "maintainer":
+            text += "; CI waits for a maintainer: " + "; ".join(f"{g}: {bd[g]}" for g in gated)
         if pace is not None:
             text += f"; 9 in 10 merges here land within {pace:g} days: " + ("too early to nudge" if age < pace else "past that")
         rows.append(("them", key, fp.get("title", ""), text, fp.get("url", "")))
@@ -564,6 +585,35 @@ def inbox_rows(st, me, now):
     return rows
 
 
+def _by_design(cfg):
+    """repo -> its packs' checks that are red by design. Packs are local files: still no network."""
+    rule_packs = packs.load([config_dir() / "packs", *cfg["packs_dirs"]])
+    return lambda repo: packs.for_repo(rule_packs, repo)["ci_by_design"]
+
+
+def done(cfg, a):
+    """Mark what waits on you on an item as handled. It leaves `inbox` until a new reason, mention or
+    review arrives. Local state only."""
+    if not a.keys:
+        raise ConfigError("done needs one or more OWNER/REPO#N")
+    path = cfg["state"]
+    with state.lock(path):
+        st, now = state.load(path), time.time()
+        me, by_design = cfg.get("login") or st.get("login") or "", _by_design(cfg)
+        # Stamped with the data you saw (the last complete run), not the clock: a mention that arrived
+        # after that run but before this command was never shown to you, so it must still show.
+        seen = st.get("last_complete") or now
+        for key in a.keys:
+            fp = st["items"].get(key)
+            why = _you_reasons(fp, me, by_design(key.partition("#")[0])) if fp and fp.get("state") == "open" else []
+            if not why:
+                raise ConfigError(f"{key}: not waiting on you (see `gh-upstream-watch inbox`)")
+            st.setdefault("done", {})[key] = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(seen)), "why": why}
+            print(f"{key}: done ({'; '.join(why)}); it comes back when something new happens")
+        state.save(path, st)
+    return 0
+
+
 def inbox(cfg, a):
     """Read-only, no network: the state the last run saved, sorted into whose move it is."""
     path = cfg["state"]
@@ -572,7 +622,7 @@ def inbox(cfg, a):
         return 0
     st, now = state.load(path), time.time()
     me = cfg.get("login") or st.get("login") or ""  # the last run saved who you are: no network here
-    rows = inbox_rows(st, me, now)
+    rows = inbox_rows(st, me, now, _by_design(cfg))
     if a.json:
         for section, key, title, why, url in rows:
             print(json.dumps({"section": section, "key": key, "title": title, "why": why, "url": url}))
@@ -700,6 +750,8 @@ def main(argv=None):
             return status(cfg)
         if a.command == "inbox":
             return inbox(cfg, a)
+        if a.command == "done":
+            return done(cfg, a)
         if a.command == "migrate":
             return migrate(cfg, a)
         if a.command == "forget":
