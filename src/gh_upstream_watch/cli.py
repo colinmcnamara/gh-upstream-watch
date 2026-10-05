@@ -15,7 +15,7 @@ from . import __version__, core, github, hooks, notify, packs, schedule, slack, 
 DEFAULTS = {"repos": [], "extras": [], "state": None, "notify": "auto", "webhook": None, "hook": None,
             "packs_dirs": [], "claim_groups": [], "recent_closed_days": 14, "retention_days": 30,
             "baseline_days": 90, "notification_repos": None, "login": None, "bots": [], "slack": {"enabled": False},
-            "escalate_after_runs": 6, "approvals": []}
+            "escalate_after_hours": 3, "approvals": []}
 
 
 def config_dir():
@@ -51,6 +51,8 @@ def build_parser():
     ap.add_argument("--extra", nargs="+", metavar="OWNER/REPO#N", help="specific items to watch as well")
     ap.add_argument("--login", help="your GitHub login (default: asked from `gh api user`)")
     ap.add_argument("--once", action="store_true", help="one pass (the only mode; accepted for scripts)")
+    ap.add_argument("--wait-network", type=int, default=0, metavar="SECONDS", help="wait up to this long for "
+                    "GitHub to answer before the run, and skip the run if it never does (scheduled runs: 180)")
     ap.add_argument("--dry-run", action="store_true", help="print alerts, save nothing, notify nothing but stdout")
     ap.add_argument("--json", action="store_true", help="alerts as JSON lines on stdout")
     ap.add_argument("--notify", choices=notify.BACKENDS, help="desktop backend (default auto; 'command' runs "
@@ -69,7 +71,7 @@ def build_parser():
     ap.add_argument("--print-plist", action="store_true", help="print a launchd agent and exit")
     ap.add_argument("--print-systemd", action="store_true", help="print a systemd user service + timer and exit")
     ap.add_argument("--print-cron", action="store_true", help="print a crontab line and exit")
-    ap.add_argument("--interval", type=int, default=30, help="minutes between runs, for the --print-* helpers")
+    ap.add_argument("--interval", type=int, default=15, help="minutes between runs, for the --print-* helpers")
     return ap
 
 
@@ -109,7 +111,7 @@ def load_config(a):
             data = json.loads(Path(path).read_text())
         except ValueError as e:
             raise ConfigError(f"config {path}: invalid JSON: {e}")
-        unknown = set(data) - set(DEFAULTS)
+        unknown = set(data) - set(DEFAULTS) - {"escalate_after_runs"}  # older configs: still honored
         if unknown:
             raise ConfigError(f"config {path}: unknown keys {sorted(unknown)}")
         cfg.update(data)
@@ -138,6 +140,9 @@ def load_config(a):
             ok = val is None or isinstance(val, str)
         if not ok:
             raise ConfigError(f"config {key}: {val!r} is not a valid value (default {default!r})")
+    old = cfg.get("escalate_after_runs")
+    if old is not None and not (isinstance(old, int) and not isinstance(old, bool) and old > 0):
+        raise ConfigError(f"config escalate_after_runs: {old!r} is not a valid value")
     cfg["packs_dirs"] = cfg["packs_dirs"] + (a.packs_dir or [])
     for r in cfg["repos"] + cfg["approvals"]:
         if r.count("/") != 1 or not all(r.split("/")):
@@ -178,16 +183,23 @@ def fold(alerts):
     return out
 
 
-def escalate(st, failed, errs, now, after):
-    """One alert when a source has been unknown for `after` runs in a row; the streak ends on success."""
+def escalate(st, failed, errs, now, cfg):
+    """One alert when a source has been unknown for `escalate_after_hours` (two runs at least, so one
+    blip never alerts), whatever the run interval; the streak ends on success. A config that still
+    sets `escalate_after_runs` keeps the old rule: that many runs in a row."""
     streak = st.setdefault("unknown_streak", {})
     for src in [s for s in streak if s not in failed]:
         del streak[src]
     out = []
     for src in sorted(failed):
-        s = streak.setdefault(src, {"since": now, "runs": 0})
+        s = streak.setdefault(src, {"since": now, "runs": 0, "alerted": False})
+        s.setdefault("alerted", s["runs"] >= 6)  # saved by 0.3.2, which alerted at run 6
         s["runs"] += 1
-        if s["runs"] == after:
+        runs = cfg.get("escalate_after_runs")
+        due = (s["runs"] == runs if runs else
+               s["runs"] >= 2 and not s.get("alerted") and now - s["since"] >= cfg["escalate_after_hours"] * 3600)
+        if due:
+            s["alerted"] = True
             since = time.strftime("%Y-%m-%d %H:%M", time.localtime(s["since"]))
             out.append(alert(now, "stuck", src, f"gh-upstream-watch: {src} not checkable since {since}",
                              hint(errs.get(src, "")) or errs.get(src, "")[:160], ""))
@@ -217,6 +229,9 @@ def alert(now, kind, key, title, message, url):
 def run(cfg, a, now=None):
     """One pass. Returns 0 when every check completed, 1 when something is unknown this run."""
     require_repos(cfg)
+    if a.wait_network > 0 and not github.wait_online(a.wait_network):
+        log(f"offline: GitHub unreachable for {a.wait_network}s, run skipped")
+        return 0
     now = now or time.time()
     rule_packs = packs.load([config_dir() / "packs", *cfg["packs_dirs"]])
     if cfg["hook"]:
@@ -281,7 +296,7 @@ def run(cfg, a, now=None):
         except Exception as e:
             unknown("login", hint(e) or e)
             st["last_unknown"] = unknowns
-            stuck = escalate(st, failed, errs, now, cfg["escalate_after_runs"])
+            stuck = escalate(st, failed, errs, now, cfg)
             if not a.dry_run:
                 kept, new = st["outbox"], [{"alert": al, "pending": list(dests)} for al in stuck]
                 st["outbox"] = kept + new
@@ -427,7 +442,7 @@ def run(cfg, a, now=None):
             st["last_complete"] = now
             state.prune(st, now, cfg["retention_days"], live)
         # Not seen by anyone if it only goes to a launchd log: one real alert per streak.
-        alerts += escalate(st, failed, errs, now, cfg["escalate_after_runs"])
+        alerts += escalate(st, failed, errs, now, cfg)
         alerts.sort(key=lambda al: not al["action"])  # what needs you first; stable within each group
         if a.dry_run:
             for al in alerts:
@@ -731,10 +746,10 @@ def migrate(cfg, a):
 
 def main(argv=None):
     a = build_parser().parse_args(argv)
+    if not (1 <= a.interval < 60 and 60 % a.interval == 0 if a.print_cron else 1 <= a.interval <= 1440):
+        log("error: --interval must divide 60 for cron (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30), 1-1440 otherwise")
+        return 2
     if a.print_plist or a.print_systemd or a.print_cron:
-        if not (1 <= a.interval < 60 and 60 % a.interval == 0 if a.print_cron else 1 <= a.interval <= 1440):
-            log("error: --interval must divide 60 for cron (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30), 1-1440 otherwise")
-            return 2
         return schedule.printers(a)
     try:
         if a.command == "init":

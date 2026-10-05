@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.3] - 2026-10-05
+
+For a laptop that sleeps:
+
+- Scheduled runs wait for the network: `--wait-network SECONDS` (the scheduler entries pass 180)
+  waits for GitHub to answer before the run and skips the run, with one `offline:` log line and no
+  state change, if it never does. Before, the first run after wake often met a network that was not
+  up yet and called every source unknown.
+- Runs every 15 minutes by default (was 30).
+- The `stuck` alert is set in time, not runs: `escalate_after_hours` (default 3), so it means the same
+  at any interval. A config that still sets `escalate_after_runs` keeps the old run-count rule.
+- The launchd agent uses calendar slots (`:00`, `:15`, `:30`, `:45` by default) when the interval divides 60.
+  launchd runs a slot missed during sleep once on wake; `StartInterval` did not, so a Mac could go
+  hours after waking with no run. Regenerate it with `gh-upstream-watch init --schedule`.
+- `init --schedule` checks `--interval` too (0 or a negative number used to get through).
+
 ## [0.3.2] - 2026-10-04
 
 From a day of real use:

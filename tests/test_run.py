@@ -324,13 +324,31 @@ def test_dry_run_on_a_new_install_previews_what_it_holds_back(watch):
     assert not watch.path.exists(), "dry-run saves nothing"
 
 
-def test_a_source_unknown_for_n_runs_escalates_once(watch):
-    notes = "notifications?page=1&participating=true&per_page=50&since=SINCE"
-    bad = {notes: {"__error__": "gh: Not Found (HTTP 404) notifications"}}
+def clock(monkeypatch, minutes):
+    """A clock that moves `minutes` ahead each time tick() is called: one scheduled run apart."""
+    t = [1.79e9]
+    monkeypatch.setattr(cli.time, "time", lambda: t[0])
+    return lambda: t.__setitem__(0, t[0] + minutes * 60)
+
+
+def failing_runs(watch, tick, n, responses=None):
+    outs = []
+    for _ in range(n):
+        tick()
+        outs.append(watch("run1" if responses else None, responses=responses)[1])
+    return [(i, line) for i, out in enumerate(outs) for line in out if "not checkable" in line]
+
+
+NOTES_404 = {"notifications?page=1&participating=true&per_page=50&since=SINCE":
+             {"__error__": "gh: Not Found (HTTP 404) notifications"}}
+
+
+@pytest.mark.parametrize("minutes", [15, 30])
+def test_a_source_unknown_for_three_hours_escalates_once(watch, monkeypatch, minutes):
+    tick = clock(monkeypatch, minutes)
     watch("run1")
-    outs = [watch("run1", responses=bad)[1] for _ in range(7)]
-    stuck = [(i, line) for i, out in enumerate(outs) for line in out if "not checkable" in line]
-    assert len(stuck) == 1 and stuck[0][0] == 5, "the 6th failing run in a row, once"
+    stuck = failing_runs(watch, tick, 200 // minutes + 2, NOTES_404)
+    assert len(stuck) == 1 and stuck[0][0] == 180 // minutes, "three hours after the first failure, once"
     assert "gh auth refresh -s notifications" in stuck[0][1]
     watch("run1")
     assert "notifications" not in watch.state()["unknown_streak"], "recovery ends the streak"
@@ -340,9 +358,20 @@ def test_escalation_while_gh_is_signed_out(watch, fake, monkeypatch):
     def signed_out(argv):
         raise cli.github.GHError("user: gh exited 4: To get started with GitHub CLI, please run:  gh auth login")
     monkeypatch.setattr(cli.github, "_run", signed_out)
-    outs = [watch(None) for _ in range(7)]
-    stuck = [line for _, out, _ in outs for line in out if "not checkable" in line]
-    assert len(stuck) == 1 and "gh auth login" in stuck[0]
+    stuck = failing_runs(watch, clock(monkeypatch, 30), 8)
+    assert len(stuck) == 1 and "gh auth login" in stuck[0][1]
+
+
+def test_an_old_config_keeps_the_run_count_rule(watch, monkeypatch, tmp_path):
+    d = tmp_path / "config" / "gh-upstream-watch"
+    d.mkdir(parents=True)
+    (d / "config.json").write_text('{"escalate_after_runs": 6}')
+    tick = clock(monkeypatch, 1)
+    watch("run1")
+    stuck = failing_runs(watch, tick, 7, NOTES_404)
+    assert len(stuck) == 1 and stuck[0][0] == 5, "the 6th failing run in a row, once"
+    (d / "config.json").write_text('{"escalate_after_runs": "6"}')
+    assert watch(None)[0] == 2
 
 
 def test_status_prints_the_fix(watch, capsys):
@@ -391,7 +420,7 @@ def test_init_schedule_installs_the_scheduler(tmp_path, monkeypatch, capsys, pla
         d = tmp_path / "config" / "systemd" / "user"
         assert (d / "gh-upstream-watch.timer").exists() and calls[-1][-1] == "gh-upstream-watch.timer"
     else:
-        assert calls == [] and "crontab -e" in out and "*/30 * * * *" in out
+        assert calls == [] and "crontab -e" in out and "*/15 * * * *" in out
     assert cli.main(["init", "--schedule"]) == 0, "with a config already there, --schedule just schedules"
     assert cli.main(["init", "--schedule", "--force"]) == 2, "a new config needs --repos to schedule"
 

@@ -29,6 +29,11 @@ RATE_LIMITED = ("rate limit", "(HTTP 429)")
 # A network blip, not an answer: one quick retry before the item is called unknown for this run.
 TRANSIENT = ('Get "http', "i/o timeout", "context deadline exceeded", "TLS handshake timeout", "connection reset",
              "unexpected EOF", "timed out after", "(HTTP 502)", "(HTTP 503)", "(HTTP 504)")
+# No route to GitHub yet (just woke, Wi-Fi joining): wait, do not call anything unknown.
+# A TLS or certificate error is not offline: it would never clear, so the run reports it.
+OFFLINE = ("error connecting to", "no such host", "dial tcp", "network is unreachable", "connection refused",
+           "no route to host", "i/o timeout", "context deadline exceeded", "TLS handshake timeout", "connection reset",
+           "timed out after", "HTTP 502", "HTTP 503", "HTTP 504", "EOF")
 RETRY_WAIT = 60  # search allows 30 requests a minute; one wait covers a burst
 
 
@@ -36,9 +41,9 @@ def gh_binary():
     return os.environ.get("GH_UPSTREAM_WATCH_GH") or "gh"
 
 
-def _run(argv):
+def _run(argv, timeout=TIMEOUT):
     try:
-        proc = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT)
+        proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as e:
         raise GHError(f"{argv[4]}: {e}")
     if proc.returncode != 0:
@@ -108,3 +113,22 @@ def search_issues(q, per_page=100, **params):
 
 def html_url(api_url):
     return (api_url or "").replace("https://api.github.com/repos/", "https://github.com/").replace("/pulls/", "/pull/")
+
+
+def wait_online(max_wait):
+    """True once GitHub answers, or on an error that is not about the network (the run reports it).
+    `rate_limit` costs nothing against the limit and goes through gh's own proxy and auth."""
+    deadline, pause = time.monotonic() + max_wait, 5
+    while True:
+        try:
+            _run([gh_binary(), "api", "--method", "GET", "rate_limit"],
+                 timeout=max(5, min(TIMEOUT, deadline - time.monotonic())))
+            return True
+        except GHError as e:
+            if not any(t in str(e) for t in OFFLINE):
+                return True
+        left = deadline - time.monotonic()
+        if left <= 5:
+            return False
+        time.sleep(min(pause, left - 5))
+        pause = min(pause * 2, 30)

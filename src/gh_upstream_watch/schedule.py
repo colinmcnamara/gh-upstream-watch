@@ -29,17 +29,26 @@ def minimal_path():
     return ":".join(dirs + [d for d in ("/usr/local/bin", "/usr/bin", "/bin") if d not in dirs])
 
 
+def trigger(minutes):
+    """launchd runs a calendar slot missed during sleep once on wake; StartInterval does not
+    reliably. Intervals that do not divide 60 keep StartInterval."""
+    if 60 % minutes:
+        return f"  <key>StartInterval</key>\n  <integer>{minutes * 60}</integer>"
+    slots = "".join(f"\n    <dict><key>Minute</key><integer>{m}</integer></dict>" for m in range(0, 60, minutes))
+    return f"  <key>StartCalendarInterval</key>\n  <array>{slots}\n  </array>"
+
+
 def render(a):
     """The scheduler files, as text: plist, service, timer, cron."""
     exe = os.path.realpath(sys.argv[0])
     prog = [sys.executable, exe] if os.path.basename(exe) == "gh-upstream-watch" else [sys.executable, "-m", "gh_upstream_watch.cli"]
     if a.config:
         prog += ["--config", os.path.abspath(a.config)]
-    prog.append("--once")
+    prog += ["--once", "--wait-network", "180"]
     fields = {"program": " ".join(prog), "interval_seconds": a.interval * 60, "interval_minutes": a.interval,
-              "path": minimal_path(), "home": str(Path.home()),
+              "trigger": trigger(a.interval), "path": minimal_path(), "home": str(Path.home()),
               "program_args": "\n".join(f"    <string>{xml_escape(p)}</string>" for p in prog)}
-    esc = {k: xml_escape(str(v)) for k, v in fields.items() if k != "program_args"}
+    esc = {k: xml_escape(str(v)) for k, v in fields.items() if k not in ("program_args", "trigger")}
     return {"plist": template("launchd.plist.template").substitute(fields, **esc),
             "service": template("systemd/gh-upstream-watch.service").substitute(fields),
             "timer": template("systemd/gh-upstream-watch.timer").substitute(fields),

@@ -33,7 +33,7 @@ class Fake:
         self.responses = json.loads((FIXTURES / "demo" / f"{name}.json").read_text())["responses"]
         return self
 
-    def run(self, argv):
+    def run(self, argv, timeout=None):
         self.calls.append(argv)
         code, out, err = fake_gh.respond({"responses": self.responses}, argv[1:])
         if code:
