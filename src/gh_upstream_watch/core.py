@@ -111,7 +111,7 @@ def fingerprint(repo, n, me, rules, bots=(), mergers=None):
         raise github.GHError(str(e))
 
 
-MERGER_PRS = 5  # merged PRs read per login before deciding it does not merge here
+MERGER_PRS = 20  # merged PRs read per login before deciding it does not merge here
 ROLE_DAYS = 7  # who merges in a repo changes rarely: an answer is asked again after a week
 
 
@@ -169,13 +169,17 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         "names_me": who(i) != me and mentions(visible(i.get("body")), me),
     }
     for g in rules["gates"]:
-        for c in others:
-            if g["_re"].match((c.get("body") or "").lstrip()) and authorized(g, who(c), c.get("author_association", "NONE")):
-                # Only a follow-up posted after the gate counts: an old /assign does not answer a new /accept.
-                done = bool(g["_then"]) and any(g["_then"].match((m.get("body") or "").lstrip())
-                                                for m in comments if who(m) == me and m["id"] > c["id"])
-                fp["gates"][g["id"]] = {"by": who(c), "done": done, "bot": is_bot(who(c), bots), "cid": c["id"]}
-                break
+        said = [c for c in others if g["_re"].match((c.get("body") or "").lstrip())]
+        ok = [c for c in said if authorized(g, who(c), c.get("author_association", "NONE"))]
+        # Or, on an issue you filed, the gate's label is on: the repo's bot applies it only after checking
+        # who commented, so the latest gate comment counts, whoever wrote it (semantic-router#4555: a
+        # MEMBER's /accept). Not on others' issues: an accepted WG charter is nothing for you to /assign.
+        c = ok[0] if ok else (said[-1] if said and fp["author"] == me and g.get("label") in fp["labels"] else None)
+        if c:
+            # Only a follow-up posted after the gate counts: an old /assign does not answer a new /accept.
+            done = bool(g["_then"]) and any(g["_then"].match((m.get("body") or "").lstrip())
+                                            for m in comments if who(m) == me and m["id"] > c["id"])
+            fp["gates"][g["id"]] = {"by": who(c), "done": done, "bot": is_bot(who(c), bots), "cid": c["id"]}
     if fp["pr"]:
         pr = github.gh_get(f"repos/{repo}/pulls/{n}")
         reviews = github.paginate(f"repos/{repo}/pulls/{n}/reviews")
@@ -288,7 +292,8 @@ def changes(old, new, me, rules):
         hit = new.get("gates", {}).get(g["id"])
         if hit and g["id"] not in (old or {}).get("gates", {}):
             text = (g.get("alert_done") or g["id"].upper() + " by @{actor}") if hit["done"] else g["alert"]
-            out.append(("gate_done" if hit["done"] else "gate", text.format(actor=hit["by"]), None))
+            if new.get("state") == "open":  # on a closed item the gate is moot: recorded, not alerted
+                out.append(("gate_done" if hit["done"] else "gate", text.format(actor=hit["by"]), None))
             fired += 0 if hit.get("bot") else 1
             fired_ids.add(hit.get("cid"))
     if old is None:

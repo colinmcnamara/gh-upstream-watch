@@ -56,8 +56,8 @@ def validate(pack, source):
     for g in pack.get("gates", []):
         need(isinstance(g, dict) and {"id", "comment", "authorized_by", "alert"} <= set(g),
              f"gate needs id, comment, authorized_by, alert: {g}")
-        need(all(isinstance(g.get(k, ""), str) for k in ("id", "comment", "alert", "then", "alert_done")),
-             f"gate {g['id']}: id, comment, alert, then, alert_done must be strings")
+        need(all(isinstance(g.get(k, ""), str) for k in ("id", "comment", "alert", "then", "alert_done", "label")),
+             f"gate {g['id']}: id, comment, alert, then, alert_done, label must be strings")
         need(g["comment"].startswith("^"), f"gate {g['id']}: comment regex must be anchored with ^")
         check_by(g["authorized_by"], f"gate {g['id']}")
         # No re.M: a gate matches only at the start of the comment body, never a quoted line further down.
@@ -122,6 +122,7 @@ def check(path):
            f"  repos {pack.get('repos', [])}"]
     for g in pack.get("gates", []):
         out.append(f"  gate {g['id']}: comment `{g['comment']}`, trusts {trust(g['authorized_by'])}"
+                   + (f", or anyone's once label `{g['label']}` is on an issue you filed" if g.get("label") else "")
                    + (f", then `{g['then']}`" if g.get("then") else ""))
     for t in pack.get("label_transitions", []):
         out.append(f"  label rule {t['id']}: has {t.get('has', [])}, lacks {t.get('lacks', [])}")

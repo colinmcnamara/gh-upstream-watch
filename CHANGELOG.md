@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- A semantic-router `/accept` from a maintainer who comments as MEMBER now alerts. The gate also
+  passes once the bot's `accepted` label is on, since the bot applies it only after checking the
+  commenter's access. Xunzhuo's `/accept` on #4555 never fired the gate before. MEMBER alone still
+  does not count, because any org member can type `/accept`. A pack gate can name such a label with
+  the new `label` key. The label counts only on issues you filed. A gate that first appears on a
+  closed item is recorded without an alert.
+- The merge check behind maintainer touches reads up to 20 of a person's reviewed, merged PRs (was
+  5). Switchyard maintainers' own merges sit as deep as 13th.
+
 ## [0.4.3] - 2026-10-08
 
 - On Python 3.9 (stock macOS `python3`), the gh extension's error now names the two quick fixes,
