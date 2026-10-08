@@ -84,7 +84,7 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
-gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.3   # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.4   # then: gh upstream-watch --help
 ```
 
 `--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on

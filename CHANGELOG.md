@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.4] - 2026-10-08
 
 - A semantic-router `/accept` from a maintainer who comments as MEMBER now alerts. The gate also
   passes once the bot's `accepted` label is on, since the bot applies it only after checking the
