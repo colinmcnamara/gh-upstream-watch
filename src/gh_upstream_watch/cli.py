@@ -559,13 +559,17 @@ def _you_reasons(fp, me, by_design):
         cr = fp.get("changes_requested")
         if cr and (fp.get("my_at") or "") < cr["at"]:  # ISO 8601 UTC strings sort as times
             why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
+        # The last word is a maintainer's, with no @you (Switchyard#855): still yours to answer.
+        if not why and (fp.get("said_at") or "") > (fp.get("my_at") or fp.get("created_at") or ""):
+            why.append("maintainer replied after you")
     return why
 
 
 def _handled(fp, why, done):
     """`done` covers these reasons: no reason is new since, and no mention or review arrived after it."""
     return bool(done) and set(why) <= set(done.get("why", [])) and all(
-        (t or "") <= done.get("at", "") for t in (fp.get("mention_at"), (fp.get("changes_requested") or {}).get("at")))
+        (t or "") <= done.get("at", "") for t in (fp.get("mention_at"), (fp.get("changes_requested") or {}).get("at"),
+                                                  fp.get("said_at")))
 
 
 def inbox_rows(st, me, now, by_design=lambda repo: {}):

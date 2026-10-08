@@ -8,6 +8,9 @@
   does not count, because any org member can type `/accept`. A pack gate can name such a label with
   the new `label` key. The label counts only on issues you filed. A gate that first appears on a
   closed item is recorded without an alert.
+- `inbox` puts your own open item under what waits on you when a maintainer's last comment or
+  COMMENTED review came after your last word, even with no @you (Switchyard#855): "maintainer
+  replied after you". An approval does not count.
 - The merge check behind maintainer touches reads up to 20 of a person's reviewed, merged PRs (was
   5). Switchyard maintainers' own merges sit as deep as 13th.
 

@@ -141,10 +141,12 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
     others = [c for c in comments if who(c) != me]
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
     mine = [c for c in comments if who(c) == me]
-    # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you.
-    touches: list[str | None] = [c.get("created_at") for c in others if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
+    # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you,
+    # with whether it says something that wants an answer (a comment, a COMMENTED review; not a verdict).
+    touches: list[tuple[str | None, bool]] = [(c.get("created_at"), True) for c in others
+                                              if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
     # Or by a CONTRIBUTOR who merges PRs here (checked below). NONE is never looked up: a drive-by costs no calls.
-    unlabeled = [(c.get("created_at"), who(c)) for c in others
+    unlabeled = [(c.get("created_at"), who(c), True) for c in others
                  if c.get("author_association") == "CONTRIBUTOR" and not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
@@ -200,20 +202,22 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         asked = [r for r in last.values() if r["state"] == "CHANGES_REQUESTED"]
         if asked:
             fp["changes_requested"] = {"by": sorted(who(r) for r in asked), "at": max(r.get("submitted_at") or "" for r in asked)}
-        touches += [r.get("submitted_at") for r in reviews if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
-        unlabeled += [(r.get("submitted_at"), who(r)) for r in reviews
+        touches += [(r.get("submitted_at"), r["state"] == "COMMENTED") for r in reviews
+                    if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
+        unlabeled += [(r.get("submitted_at"), who(r), r["state"] == "COMMENTED") for r in reviews
                       if r.get("author_association") == "CONTRIBUTOR" and not is_bot(who(r), bots)]
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
-    # Only on your own work, the only place `inbox` shows it, and only unlabeled touches after the last
-    # labeled one can move it, newest first: the first merger ends it.
-    labeled = max((t for t in touches if t), default="")
-    for at, login in sorted((u for u in unlabeled if u[0] and u[0] > labeled and fp["author"] == me), reverse=True):
-        if merged_here(repo, login, mergers):
-            touches.append(at)
-            break
-    fp["their_at"] = max((t for t in touches if t), default=None)
+    # Only on your own work, the only place `inbox` shows it, and only unlabeled touches that would move
+    # the latest touch (or the latest word), newest first.
+    def latest(words):
+        return max((t for t, said in touches if t and (said or not words)), default="")
+    for at, login, word in sorted(unlabeled, key=lambda u: u[0] or "", reverse=True):
+        if at and fp["author"] == me and at > latest(word) and merged_here(repo, login, mergers):
+            touches.append((at, word))
+    fp["their_at"] = latest(False) or None
+    fp["said_at"] = latest(True) or None  # the latest maintainer word that wants an answer
     return fp
 
 
