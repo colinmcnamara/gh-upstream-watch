@@ -153,3 +153,14 @@ def test_someone_else_assigned_to_your_item_needs_you(fake):
     theirs_old, theirs_new = issue_fp(fake, author="someone"), issue_fp(fake, author="someone", assignees=["rival"])
     assert not [a for a in core.changes(theirs_old, theirs_new, ME, RULES) if a[0] == "assigned_other"]
 
+
+def test_an_item_that_could_not_be_read_this_run_says_so_in_inbox():
+    """One item stuck unknown keeps its old reading; its row says how old that reading is."""
+    now = 1.79e9
+    item = {"state": "open", "author": ME, "title": "Fix", "url": "u", "created_at": "2026-10-01T00:00:00Z",
+            "my_at": "2026-10-01T00:00:00Z", "pr": False}
+    st = {"items": {f"{R}#1": dict(item, _seen=now - 60), f"{R}#2": dict(item, _seen=now - 3 * 3600)},
+          "claimable": {"seen": {}}, "done": {}}
+    rows = {key: why for _, key, _, why, _ in cli.inbox_rows(st, ME, now)}
+    assert "not refreshed" not in rows[f"{R}#1"]
+    assert rows[f"{R}#2"].endswith("; stale: last read 3 h ago")

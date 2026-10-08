@@ -8,6 +8,8 @@
   does not count, because any org member can type `/accept`. A pack gate can name such a label with
   the new `label` key. The label counts only on issues you filed. A gate that first appears on a
   closed item is recorded without an alert.
+- `inbox` marks a row whose item could not be read for over an hour, next to the newest read:
+  "stale: last read 3 h ago".
 - Your own issue or PR closed by someone else without a merge alerts as an action (`closed`), and
   so does someone else being assigned to it (`assigned_other`).
 - A push after a change request answers it, as a reply does: the head commit's date counts, read

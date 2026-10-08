@@ -574,18 +574,24 @@ def _handled(fp, why, done):
                                                   fp.get("said_at")))
 
 
+STALE = 3600  # ponytail: fixed; an hour behind the newest read is four missed runs at the default interval
+
+
 def inbox_rows(st, me, now, by_design=lambda repo: {}):
     """[(section, key, title, why, url)] from the saved state: what waits on you, what waits on them
     (your own open work, with this repo's pace), and rows the claim boards list now. `by_design`
     gives a repo's checks that are red by design (from its packs)."""
     rows = []
+    # An item whose reads keep failing keeps its old reading: say how old, next to the newest read.
+    newest = max((fp.get("_seen", 0) for fp in st["items"].values()), default=0)
+    stale = lambda fp: f"; stale: last read {ago(fp['_seen'], now)}" if newest - fp.get("_seen", newest) > STALE else ""  # noqa: E731
     for key, fp in sorted(st["items"].items()):
         if fp.get("state") != "open":
             continue
         mine, bd = fp.get("author") == me, by_design(key.partition("#")[0])
         why = _you_reasons(fp, me, bd)
         if why and not _handled(fp, why, st.get("done", {}).get(key)):
-            rows.append(("you", key, fp.get("title", ""), "; ".join(why), fp.get("url", "")))
+            rows.append(("you", key, fp.get("title", ""), "; ".join(why) + stale(fp), fp.get("url", "")))
             continue
         if not mine:
             continue
@@ -602,7 +608,7 @@ def inbox_rows(st, me, now, by_design=lambda repo: {}):
             text += "; CI waits for a maintainer: " + "; ".join(f"{g}: {bd[g]}" for g in gated)
         if pace is not None:
             text += f"; 9 in 10 merges here land within {pace:g} days: " + ("too early to nudge" if age < pace else "past that")
-        rows.append(("them", key, fp.get("title", ""), text, fp.get("url", "")))
+        rows.append(("them", key, fp.get("title", ""), text + stale(fp), fp.get("url", "")))
     seen = st["claimable"]["seen"]
     for key in sorted({k for rows_ in st["claimable"].get("board", {}).values() for k in rows_}):
         if key not in st["items"]:  # still on the board, and not already yours to watch

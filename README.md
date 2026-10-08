@@ -177,7 +177,8 @@ changes requested since your last reply or push, or a maintainer's reply after y
 has waited, when a maintainer last touched it, and how long 9 in 10 of the repo's merged PRs took
 from open to merge (from up to 100 most recently updated) (refreshed daily), so you can see when it is still too
 early to nudge. A maintainer is an owner, member or collaborator, or a contributor who has merged a PR
-there: GitHub labels a maintainer whose org membership is private a contributor.
+there: GitHub labels a maintainer whose org membership is private a contributor. A row whose item
+could not be read for over an hour says how old its reading is.
 
 ### Failures and exit codes
 
