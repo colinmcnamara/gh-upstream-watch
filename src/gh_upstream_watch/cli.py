@@ -321,11 +321,12 @@ def run(cfg, a, now=None):
         retry = {k: t for k, t in st.get("retry", {}).items() if now - t < cfg["baseline_days"] * 86400}
         watch = found | set(cfg["extras"]) | set(retry) | {k for k, v in old.items() if v.get("state") == "open"}
         items, gone = {}, set()
+        mergers = st["mergers"] = core.remembered(st.get("mergers", {}), now)  # who merges PRs where, saved below
         for key in sorted(watch):
             repo, _, n = key.partition("#")
             rules = packs.for_repo(rule_packs, repo)
             try:
-                fp = core.fingerprint(repo, int(n), me, rules, cfg["bots"])
+                fp = core.fingerprint(repo, int(n), me, rules, cfg["bots"], mergers)
             except github.NotFound as e:
                 # Deleted, transferred, or no longer visible: say so once, then stop watching it.
                 gone.add(key)
