@@ -12,7 +12,8 @@ KEEP_IDS = 200
 SETTLED_DAYS = 7  # ponytail: fixed; "referenced by" on an item closed longer than this is dropped
 # Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
 ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
-                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict", "approval"}
+                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict", "approval",
+                "closed", "assigned_other"}
 
 
 def plural(n, word):
@@ -141,14 +142,16 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
     others = [c for c in comments if who(c) != me]
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
     mine = [c for c in comments if who(c) == me]
-    # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you.
-    touches: list[str | None] = [c.get("created_at") for c in others if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
+    # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you,
+    # with whether it says something that wants an answer (a comment, a COMMENTED review; not a verdict).
+    touches: list[tuple[str | None, bool]] = [(c.get("created_at"), True) for c in others
+                                              if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
     # Or by a CONTRIBUTOR who merges PRs here (checked below). NONE is never looked up: a drive-by costs no calls.
-    unlabeled = [(c.get("created_at"), who(c)) for c in others
+    unlabeled = [(c.get("created_at"), who(c), True) for c in others
                  if c.get("author_association") == "CONTRIBUTOR" and not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
-        "closed_at": i.get("closed_at"),
+        "closed_at": i.get("closed_at"), "closed_by": (i.get("closed_by") or {}).get("login"),
         "labels": sorted(label["name"] for label in i["labels"]),
         "assignees": sorted(a["login"] for a in i.get("assignees") or []),
         "comments": len(comments),
@@ -200,20 +203,35 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         asked = [r for r in last.values() if r["state"] == "CHANGES_REQUESTED"]
         if asked:
             fp["changes_requested"] = {"by": sorted(who(r) for r in asked), "at": max(r.get("submitted_at") or "" for r in asked)}
-        touches += [r.get("submitted_at") for r in reviews if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
-        unlabeled += [(r.get("submitted_at"), who(r)) for r in reviews
+        touches += [(r.get("submitted_at"), r["state"] == "COMMENTED") for r in reviews
+                    if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
+        unlabeled += [(r.get("submitted_at"), who(r), r["state"] == "COMMENTED") for r in reviews
                       if r.get("author_association") == "CONTRIBUTOR" and not is_bot(who(r), bots)]
+        # Mentions in review bodies and inline review comments (semantic-router#4658). Inline comments
+        # cost a call, so only on your own open PR with a human review: elsewhere notifications cover them.
+        talk = [r for r in reviews if not is_bot(who(r), bots)]
+        if talk and fp["author"] == me and fp["state"] == "open":
+            talk += [c for c in github.paginate(f"repos/{repo}/pulls/{n}/comments")
+                     if who(c) != me and not is_bot(who(c), bots)]
+        named = [x.get("submitted_at") or x.get("created_at") or "" for x in talk if mentions(visible(x.get("body")), me)]
+        fp["mention_at"] = max([fp["mention_at"] or "", *named]) or None
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
-    # Only on your own work, the only place `inbox` shows it, and only unlabeled touches after the last
-    # labeled one can move it, newest first: the first merger ends it.
-    labeled = max((t for t in touches if t), default="")
-    for at, login in sorted((u for u in unlabeled if u[0] and u[0] > labeled and fp["author"] == me), reverse=True):
-        if merged_here(repo, login, mergers):
-            touches.append(at)
-            break
-    fp["their_at"] = max((t for t in touches if t), default=None)
+            # A push answers a change request as well as a reply does. One call, only while it is unanswered.
+            cr = fp.get("changes_requested")
+            if cr and sha and fp["state"] == "open" and (fp["my_at"] or "") < cr["at"]:
+                fp["pushed_at"] = (((github.gh_get(f"repos/{repo}/commits/{sha}").get("commit") or {})
+                                    .get("committer") or {}).get("date"))
+    # Only on your own work, the only place `inbox` shows it, and only unlabeled touches that would move
+    # the latest touch (or the latest word), newest first.
+    def latest(words):
+        return max((t for t, said in touches if t and (said or not words)), default="")
+    for at, login, word in sorted(unlabeled, key=lambda u: u[0] or "", reverse=True):
+        if at and fp["author"] == me and at > latest(word) and merged_here(repo, login, mergers):
+            touches.append((at, word))
+    fp["their_at"] = latest(False) or None
+    fp["said_at"] = latest(True) or None  # the latest maintainer word that wants an answer
     return fp
 
 
@@ -300,6 +318,9 @@ def changes(old, new, me, rules):
         return out
     if me in new["assignees"] and me not in old.get("assignees", []):
         out.append(("assigned", msg.get("assigned", "ASSIGNED to you"), None))
+    others = sorted(set(new["assignees"]) - set(old.get("assignees", [])) - {me})
+    if others and new.get("author") == me:  # someone else on your own issue or PR: did they take it over?
+        out.append(("assigned_other", f"ASSIGNED to @{', @'.join(others)}: check whether they took it over", None))
     for t in rules["label_transitions"]:
         def holds(fp, t=t):
             labels = set(fp.get("labels", []))
@@ -310,7 +331,10 @@ def changes(old, new, me, rules):
     if old.get("state") == "closed" and new["state"] == "open" and me not in new["assignees"]:
         out.append(("reopened", msg.get("reopened", "REOPENED"), None))
     elif old.get("state") != new["state"] and not (new.get("merged") and not old.get("merged")):
-        out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
+        if new["state"] == "closed" and new.get("author") == me and new.get("closed_by") not in (None, me):
+            out.append(("closed", f"CLOSED by @{new['closed_by']} without merging: check why", None))
+        else:
+            out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
     loud = lambda labels: {x for x in labels if not any(r.search(x) for r in rules.get("quiet_labels", []))}  # noqa: E731
     added = sorted(loud(new["labels"]) - loud(old.get("labels", [])))
     removed = sorted(loud(old.get("labels", [])) - loud(new["labels"]))
@@ -465,16 +489,21 @@ def _epoch(iso):
         return time.time()
 
 
-def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: ()):
-    """Unread notifications, any repo, where someone asked for you; once per update. Mentions say who
+def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: (), seed_read=False):
+    """Notifications, any repo, read or not, where someone asked for you; once per update. A thread you
+    read on your phone or the web still alerts. `seed_read` (the first run that reads read threads)
+    records the ones already read without alerting, so the backlog in the window does not flood you. Mentions say who
     and what. On a quiet-title thread (a megathread) a mention alerts only when a comment really
     names you: GitHub keeps calling every later post in a thread you were named in a "mention".
     Every id GitHub still returns goes into `live`, so pruning never forgets it."""
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - retention_days * 86400))
     fresh, budget = [], [LOOKUPS_PER_RUN]
-    for n in github.paginate("notifications", {"participating": "true", "since": since}, per_page=50):
+    for n in github.paginate("notifications", {"all": "true", "participating": "true", "since": since}, per_page=50):
         live.add(n["id"])
         if not repo_matches(n["repository"]["full_name"], repos) or n["reason"] not in ASKS or seen.get(n["id"]) == n["updated_at"]:
+            continue
+        if seed_read and not n.get("unread", True):
+            seen[n["id"]] = n["updated_at"]  # read before this version looked at read threads: backlog, not news
             continue
         # Look at what happened since the last update of this thread that was handled, exactly; a
         # thread seen for the first time is read back over the retention window.

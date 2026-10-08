@@ -193,7 +193,7 @@ def notification(nid, reason, updated):
 
 
 def test_notifications_alert_once_per_update(fake):
-    key = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+    key = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
     fake.responses[key] = [notification("1", "mention", "t1"), notification("2", "subscribed", "t1")]
     seen, live = {}, set()
     first = core.notification_asks(seen, 30, 1.7e9, live)
@@ -262,7 +262,7 @@ def test_review_ids_catch_a_second_approval(fake):
 
 def test_notifications_follow_watched_repos_exactly(fake):
     """Item 13: --repos acme/widgets does not pull in acme/gadgets; globs are explicit."""
-    key = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+    key = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
     other = dict(notification("9", "mention", "t1"), repository={"full_name": "acme/gadgets"})
     fake.responses[key] = [notification("1", "mention", "t1"), other]
     assert len(core.notification_asks({}, 30, 1.7e9, set(), ["acme/widgets"])) == 1

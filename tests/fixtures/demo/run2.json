@@ -1,6 +1,6 @@
 {
  "responses": {
-  "notifications?page=1&participating=true&per_page=50&since=SINCE": [
+  "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE": [
    {
     "id": "1001",
     "reason": "mention",

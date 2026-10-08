@@ -29,6 +29,7 @@ def item(fake, n, comments, reviews=None, author=ME):
     if reviews is not None:
         fake.responses[f"repos/{R}/pulls/{n}"] = {"merged": False, "mergeable_state": "clean"}
         fake.responses[f"repos/{R}/pulls/{n}/reviews?page=1&per_page=100"] = reviews
+        fake.responses[f"repos/{R}/pulls/{n}/comments?page=1&per_page=100"] = []
 
 
 def comment(i, login, assoc, at):

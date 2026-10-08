@@ -391,8 +391,10 @@ def run(cfg, a, now=None):
         try:
             alerts += [("notifications", alert(now, **x))
                        for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos, me,
-                                                       lambda r: packs.for_repo(rule_packs, r)["quiet_titles"])]
+                                                       lambda r: packs.for_repo(rule_packs, r)["quiet_titles"],
+                                                       seed_read=not st["notifications"].get("read_too"))]
             st["notifications"]["seen"] = seen
+            st["notifications"]["read_too"] = True  # read threads are watched from here on
         except Exception as e:
             unknown("notifications", e)
 
@@ -557,15 +559,22 @@ def _you_reasons(fp, me, by_design):
         if fp.get("draft"):
             why.append("draft: mark it ready for review")
         cr = fp.get("changes_requested")
-        if cr and (fp.get("my_at") or "") < cr["at"]:  # ISO 8601 UTC strings sort as times
+        if cr and max(fp.get("my_at") or "", fp.get("pushed_at") or "") < cr["at"]:  # ISO 8601 UTC sorts as time
             why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
+        # The last word is a maintainer's, with no @you (Switchyard#855): still yours to answer.
+        if not why and (fp.get("said_at") or "") > (fp.get("my_at") or fp.get("created_at") or ""):
+            why.append("maintainer replied after you")
     return why
 
 
 def _handled(fp, why, done):
     """`done` covers these reasons: no reason is new since, and no mention or review arrived after it."""
     return bool(done) and set(why) <= set(done.get("why", [])) and all(
-        (t or "") <= done.get("at", "") for t in (fp.get("mention_at"), (fp.get("changes_requested") or {}).get("at")))
+        (t or "") <= done.get("at", "") for t in (fp.get("mention_at"), (fp.get("changes_requested") or {}).get("at"),
+                                                  fp.get("said_at")))
+
+
+STALE = 3600  # ponytail: fixed; an hour behind the newest read is four missed runs at the default interval
 
 
 def inbox_rows(st, me, now, by_design=lambda repo: {}):
@@ -573,17 +582,20 @@ def inbox_rows(st, me, now, by_design=lambda repo: {}):
     (your own open work, with this repo's pace), and rows the claim boards list now. `by_design`
     gives a repo's checks that are red by design (from its packs)."""
     rows = []
+    # An item whose reads keep failing keeps its old reading: say how old, next to the newest read.
+    newest = max((fp.get("_seen", 0) for fp in st["items"].values()), default=0)
+    stale = lambda fp: f"; stale: last read {ago(fp['_seen'], now)}" if newest - fp.get("_seen", newest) > STALE else ""  # noqa: E731
     for key, fp in sorted(st["items"].items()):
         if fp.get("state") != "open":
             continue
         mine, bd = fp.get("author") == me, by_design(key.partition("#")[0])
         why = _you_reasons(fp, me, bd)
         if why and not _handled(fp, why, st.get("done", {}).get(key)):
-            rows.append(("you", key, fp.get("title", ""), "; ".join(why), fp.get("url", "")))
+            rows.append(("you", key, fp.get("title", ""), "; ".join(why) + stale(fp), fp.get("url", "")))
             continue
         if not mine:
             continue
-        waited = _days(max(fp.get("created_at") or "", fp.get("my_at") or ""), now) or 0
+        waited = _days(max(fp.get("created_at") or "", fp.get("my_at") or "", fp.get("pushed_at") or ""), now) or 0
         age = _days(fp.get("created_at"), now) or 0  # the pace is open-to-merge, so the verdict uses age
         touch = _days(fp.get("their_at"), now)
         pace = st.get("pace", {}).get(key.partition("#")[0], {}).get("p90") if fp.get("pr") else None  # merge pace: PRs only
@@ -596,7 +608,7 @@ def inbox_rows(st, me, now, by_design=lambda repo: {}):
             text += "; CI waits for a maintainer: " + "; ".join(f"{g}: {bd[g]}" for g in gated)
         if pace is not None:
             text += f"; 9 in 10 merges here land within {pace:g} days: " + ("too early to nudge" if age < pace else "past that")
-        rows.append(("them", key, fp.get("title", ""), text, fp.get("url", "")))
+        rows.append(("them", key, fp.get("title", ""), text + stale(fp), fp.get("url", "")))
     seen = st["claimable"]["seen"]
     for key in sorted({k for rows_ in st["claimable"].get("board", {}).values() for k in rows_}):
         if key not in st["items"]:  # still on the board, and not already yours to watch

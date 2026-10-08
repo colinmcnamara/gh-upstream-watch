@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.5] - 2026-10-08
+
+- `inbox` puts your own open item under what waits on you when a maintainer's last comment or
+  COMMENTED review came after your last word, even with no @you (Switchyard#855): "maintainer
+  replied after you". An approval does not count.
+- Review bodies and inline review comments are read for mentions. An inline reply naming you after
+  your last word is an unanswered mention (semantic-router#4658). Inline comments cost one call a
+  run, only on your own open PRs with a human review.
+- A notification thread you already read on your phone or the web still alerts when it updates
+  (`all=true`). The first run after the upgrade records the threads already read without alerting.
+- A push after a change request answers it, as a reply does: the head commit's date counts, read
+  only while the request is unanswered (one call). "waiting N days" counts it too.
+- Your own issue or PR closed by someone else without a merge alerts as an action (`closed`), and
+  so does someone else being assigned to it (`assigned_other`).
+- `inbox` marks a row whose item could not be read for over an hour, next to the newest read:
+  "stale: last read 3 h ago".
+
 ## [0.4.4] - 2026-10-08
 
 - A semantic-router `/accept` from a maintainer who comments as MEMBER now alerts. The gate also

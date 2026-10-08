@@ -8,7 +8,7 @@ from conftest import FIXTURES
 from gh_upstream_watch import cli, core, github, packs
 
 ME = "octocat"
-NOTES = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+NOTES = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
 RULES = packs.for_repo(packs.load([FIXTURES / "packs"]), "acme/widgets")  # quiet: ^\[Community\]
 REBASE = ("This pull request has merge conflicts that must be resolved before it can be\nmerged. "
           "Please rebase the PR, @octocat.\n\nhttps://docs.github.com/en/pull-requests")

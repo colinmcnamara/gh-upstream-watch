@@ -84,7 +84,7 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
-gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.4   # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.5   # then: gh upstream-watch --help
 ```
 
 `--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on
@@ -151,7 +151,7 @@ nothing. After a longer gap, an item opened and closed in between can be missed.
   closed ones updated in the last `recent_closed_days`, `extras` (`owner/repo#n`), and anything
   already watched that is still open. A closed item's saved state is kept for `baseline_days`
   (90) after it was last checked, so a reopen in that time alerts; after that it seeds quietly;
-- unread GitHub notifications that mention you, request your review, or assign you, in the repos
+- GitHub notifications, read or unread, that mention you, request your review, or assign you, in the repos
   of `repos` and `extras` (`notification_repos` widens or narrows that). This needs the
   `notifications` scope: `gh auth refresh -s notifications` if they come back 403;
 - claim boards defined by a pack (an issue that lists claimable tasks), for `claim_groups`. Only a
@@ -171,12 +171,14 @@ nothing. After a longer gap, an item opened and closed in between can be missed.
 ### The inbox
 
 `inbox` reads only the saved state, so it is instant and makes no GitHub calls. It lists what waits
-on you (an accepted issue not yet claimed, an unanswered mention, red CI, a merge conflict, a draft,
-changes requested since your last reply), then what waits on them: your own open work, how long it
+on you (an accepted issue not yet claimed, an unanswered mention in a comment, a review or an inline
+review comment, red CI, a merge conflict, a draft,
+changes requested since your last reply or push, or a maintainer's reply after your last word), then what waits on them: your own open work, how long it
 has waited, when a maintainer last touched it, and how long 9 in 10 of the repo's merged PRs took
 from open to merge (from up to 100 most recently updated) (refreshed daily), so you can see when it is still too
 early to nudge. A maintainer is an owner, member or collaborator, or a contributor who has merged a PR
-there: GitHub labels a maintainer whose org membership is private a contributor.
+there: GitHub labels a maintainer whose org membership is private a contributor. A row whose item
+could not be read for over an hour says how old its reading is.
 
 ### Failures and exit codes
 
@@ -259,8 +261,8 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 | field | meaning |
 | --- | --- |
 | `v` | shape version, `1` |
-| `kind` | `gate`, `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed`, `ci_passed`, `ci_waiting`, `conflict`, `approval`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
-| `action` | `true` when it needs you to do something: `gate`, `competing_pr`, `reopened`, `assigned`, `label_rule`, `claimable`, `notification`, `mentions`, `slack`, `stuck`, `changes_requested`, `ci_failed`, `conflict`, `approval` |
+| `kind` | `gate`, `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `closed`, `assigned`, `assigned_other`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed`, `ci_passed`, `ci_waiting`, `conflict`, `approval`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
+| `action` | `true` when it needs you to do something: `gate`, `competing_pr`, `reopened`, `assigned`, `label_rule`, `claimable`, `notification`, `mentions`, `slack`, `stuck`, `changes_requested`, `ci_failed`, `conflict`, `approval`, `closed`, `assigned_other` |
 | `key` | `owner/repo#n` for an item; otherwise `owner/repo TYPE ID` for a notification about something else (a discussion, a release), the source (`stuck`), `owner/repo run ID` (`approval`), or the Slack `channel:ts` |
 | `title`, `message` | the human text; the text line is `title: message (url)` |
 | `url` | a `https://github.com/` or `https://*.slack.com/` link, or empty; a hook's alerts carry its own |
