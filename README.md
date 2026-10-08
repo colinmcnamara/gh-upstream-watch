@@ -84,7 +84,7 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
-gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.3   # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.4   # then: gh upstream-watch --help
 ```
 
 `--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on
@@ -307,7 +307,7 @@ To alert on your project's own command (say `/approve`), save a copy as
 | --- | --- |
 | `id` | unique name; a later pack with the same id replaces an earlier one |
 | `repos` | globs (`owner/*`) this pack applies to; `*` packs apply first |
-| `gates` | `{id, comment, authorized_by: {associations, logins}, alert, then?, alert_done?}`: `comment` must start with `^`; `{actor}` in alerts |
+| `gates` | `{id, comment, authorized_by: {associations, logins}, alert, then?, alert_done?, label?}`: `comment` must start with `^`; `{actor}` in alerts |
 | `label_transitions` | `{id, alert, has?, lacks?, assigned_to_me?}`: alerts when the condition becomes true |
 | `quiet_titles` | regexes; matching items alert on comments only when they `@`-name you (gates still alert) |
 | `quiet_labels` | regexes; adding or removing only these labels does not alert (label rules still see them) |
@@ -319,7 +319,9 @@ A gate matches only at the start of a comment (not a quoted line further down). 
 `logins`, only those logins count. Otherwise only its `associations` count, `OWNER` and
 `COLLABORATOR` by default; `MEMBER` is not a default because an organization member can have
 read-only access. Author association alone cannot prove who may run a gate, so list the
-maintainers' logins when you know them. On first sight of an item, gates are checked too: an
+maintainers' logins when you know them. A gate's `label` is one a repo's bot applies only after
+checking the commenter's access (semantic-router's `accepted`): once it is on an issue you filed,
+the latest gate comment counts, whoever wrote it. A gate on a closed item is recorded without an alert. On first sight of an item, gates are checked too: an
 `/accept` already waiting alerts once. `then` is your own follow-up command; once you have posted
 it after the gate comment, the alert drops the call to action. `quiet_titles` apply only when the
 title was quiet before the change as well, so renaming an issue cannot silence it.

@@ -14,7 +14,7 @@ DAY = 86400
 
 
 def search_key(login):
-    return f"search/issues?per_page=5&q=repo:{R} is:pr is:merged reviewed-by:{login} -author:{login}&sort=updated"
+    return f"search/issues?per_page={core.MERGER_PRS}&q=repo:{R} is:pr is:merged reviewed-by:{login} -author:{login}&sort=updated"
 
 
 def item(fake, n, comments, reviews=None, author=ME):
