@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.3] - 2026-10-08
+
+- On Python 3.9 (stock macOS `python3`), the gh extension's error now names the two quick fixes,
+  `brew install python` or `uv tool install gh-upstream-watch` (uv brings its own Python), before
+  the option to pin v0.3.3.
+- A maintainer whose org membership is private now counts as a maintainer. GitHub labels such a
+  person CONTRIBUTOR, so `inbox` said "no maintainer touch yet" after one had commented. A CONTRIBUTOR's
+  comment or review newer than the last labeled maintainer touch now counts if that person merged one
+  of their 5 most recent reviewed PRs in the repo. It is still GET-only: one search plus up to 5 PR
+  reads per person, only on your own open work (the only place `inbox` shows it), and none when a
+  labeled maintainer spoke last. Each answer is kept in the state file (`mergers`) and asked again
+  after a week. Rule-pack gates are unchanged.
+
 ## [0.4.2] - 2026-10-05
 
 - Each GitHub Release carries signed build provenance for the wheel and sdist

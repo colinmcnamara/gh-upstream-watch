@@ -221,7 +221,7 @@ wheels = [
 
 [[package]]
 name = "gh-upstream-watch"
-version = "0.4.2"
+version = "0.4.3"
 source = { editable = "." }
 
 [package.dev-dependencies]

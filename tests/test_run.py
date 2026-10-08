@@ -224,6 +224,7 @@ def test_the_gh_extension_shim_names_the_python_it_needs():
     code = "import sys; sys.version_info = (3, 9, 6); sys.argv = ['gh-upstream-watch']; exec(compile(sys.stdin.read(), 'shim', 'exec'))"
     p = subprocess.run([sys.executable, "-c", code], input=shim, capture_output=True, text=True)
     assert p.returncode == 1 and "needs Python 3.10 or newer" in p.stderr and "--pin v0.3.3" in p.stderr
+    assert "brew install python" in p.stderr and "uv tool install gh-upstream-watch" in p.stderr
 
 
 # --- red-team round 2 (v0.1.1) -----------------------------------------------------------------

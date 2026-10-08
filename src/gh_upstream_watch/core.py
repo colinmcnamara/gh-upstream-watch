@@ -100,23 +100,52 @@ def cross_refs(repo, n, me):
     return sorted(refs.values())
 
 
-def fingerprint(repo, n, me, rules, bots=()):
-    """Everything about repo#n that can change. Raises GHError if any page fails."""
+def fingerprint(repo, n, me, rules, bots=(), mergers=None):
+    """Everything about repo#n that can change. Raises GHError if any page fails.
+    `mergers` holds merged_here answers; a run passes the ones saved in its state."""
     i = github.gh_get(f"repos/{repo}/issues/{n}")  # NotFound here means the item is gone
     try:
-        return _fingerprint(i, repo, n, me, rules, bots)
+        return _fingerprint(i, repo, n, me, rules, bots, {} if mergers is None else mergers)
     except github.NotFound as e:
         # The issue is visible but a part of it is not (say, PR data the token cannot read): unknown, not gone.
         raise github.GHError(str(e))
 
 
-def _fingerprint(i, repo, n, me, rules, bots):
+MERGER_PRS = 5  # merged PRs read per login before deciding it does not merge here
+ROLE_DAYS = 7  # who merges in a repo changes rarely: an answer is asked again after a week
+
+
+def merged_here(repo, login, seen):
+    """Whether `login` merged a PR in `repo`: GitHub labels a maintainer whose org membership is private
+    CONTRIBUTOR, and merging proves the role. GET-only: the newest merged PRs they reviewed (not their
+    own), then each one's merged_by until one is theirs. 1 search and up to MERGER_PRS reads, remembered
+    in `seen` ({repo: {login: {"merges", "at"}}}, saved in the state file)."""
+    known = seen.setdefault(repo, {})
+    if login not in known:
+        q = f"repo:{repo} is:pr is:merged reviewed-by:{login} -author:{login}"
+        prs = github.gh_get("search/issues", {"q": q, "sort": "updated", "per_page": MERGER_PRS})["items"]
+        known[login] = {"merges": any((github.gh_get(f"repos/{repo}/pulls/{p['number']}").get("merged_by") or {})
+                                      .get("login") == login for p in prs), "at": time.time()}
+    return known[login]["merges"]
+
+
+def remembered(mergers, now):
+    """The saved merged_here answers younger than ROLE_DAYS; older ones are asked again if still needed."""
+    fresh = {repo: {login: v for login, v in logins.items() if now - v["at"] < ROLE_DAYS * 86400}
+             for repo, logins in mergers.items()}
+    return {repo: logins for repo, logins in fresh.items() if logins}
+
+
+def _fingerprint(i, repo, n, me, rules, bots, mergers):
     comments = github.paginate(f"repos/{repo}/issues/{n}/comments") if i.get("comments") else []
     others = [c for c in comments if who(c) != me]
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
     mine = [c for c in comments if who(c) == me]
     # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you.
-    touches = [c.get("created_at") for c in others if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
+    touches: list[str | None] = [c.get("created_at") for c in others if c.get("author_association") in TRUSTED and not is_bot(who(c), bots)]
+    # Or by a CONTRIBUTOR who merges PRs here (checked below). NONE is never looked up: a drive-by costs no calls.
+    unlabeled = [(c.get("created_at"), who(c)) for c in others
+                 if c.get("author_association") == "CONTRIBUTOR" and not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
         "closed_at": i.get("closed_at"),
@@ -168,9 +197,18 @@ def _fingerprint(i, repo, n, me, rules, bots):
         if asked:
             fp["changes_requested"] = {"by": sorted(who(r) for r in asked), "at": max(r.get("submitted_at") or "" for r in asked)}
         touches += [r.get("submitted_at") for r in reviews if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
+        unlabeled += [(r.get("submitted_at"), who(r)) for r in reviews
+                      if r.get("author_association") == "CONTRIBUTOR" and not is_bot(who(r), bots)]
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
+    # Only on your own work, the only place `inbox` shows it, and only unlabeled touches after the last
+    # labeled one can move it, newest first: the first merger ends it.
+    labeled = max((t for t in touches if t), default="")
+    for at, login in sorted((u for u in unlabeled if u[0] and u[0] > labeled and fp["author"] == me), reverse=True):
+        if merged_here(repo, login, mergers):
+            touches.append(at)
+            break
     fp["their_at"] = max((t for t in touches if t), default=None)
     return fp
 

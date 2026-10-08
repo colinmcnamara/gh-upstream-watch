@@ -84,7 +84,7 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
-gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.2   # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.3   # then: gh upstream-watch --help
 ```
 
 `--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on
@@ -175,7 +175,8 @@ on you (an accepted issue not yet claimed, an unanswered mention, red CI, a merg
 changes requested since your last reply), then what waits on them: your own open work, how long it
 has waited, when a maintainer last touched it, and how long 9 in 10 of the repo's merged PRs took
 from open to merge (from up to 100 most recently updated) (refreshed daily), so you can see when it is still too
-early to nudge.
+early to nudge. A maintainer is an owner, member or collaborator, or a contributor who has merged a PR
+there: GitHub labels a maintainer whose org membership is private a contributor.
 
 ### Failures and exit codes
 
