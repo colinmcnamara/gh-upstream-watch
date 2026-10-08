@@ -477,16 +477,21 @@ def _epoch(iso):
         return time.time()
 
 
-def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: ()):
-    """Unread notifications, any repo, where someone asked for you; once per update. Mentions say who
+def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: (), seed_read=False):
+    """Notifications, any repo, read or not, where someone asked for you; once per update. A thread you
+    read on your phone or the web still alerts. `seed_read` (the first run that reads read threads)
+    records the ones already read without alerting, so the backlog in the window does not flood you. Mentions say who
     and what. On a quiet-title thread (a megathread) a mention alerts only when a comment really
     names you: GitHub keeps calling every later post in a thread you were named in a "mention".
     Every id GitHub still returns goes into `live`, so pruning never forgets it."""
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - retention_days * 86400))
     fresh, budget = [], [LOOKUPS_PER_RUN]
-    for n in github.paginate("notifications", {"participating": "true", "since": since}, per_page=50):
+    for n in github.paginate("notifications", {"all": "true", "participating": "true", "since": since}, per_page=50):
         live.add(n["id"])
         if not repo_matches(n["repository"]["full_name"], repos) or n["reason"] not in ASKS or seen.get(n["id"]) == n["updated_at"]:
+            continue
+        if seed_read and not n.get("unread", True):
+            seen[n["id"]] = n["updated_at"]  # read before this version looked at read threads: backlog, not news
             continue
         # Look at what happened since the last update of this thread that was handled, exactly; a
         # thread seen for the first time is read back over the retention window.

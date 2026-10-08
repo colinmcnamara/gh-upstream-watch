@@ -151,7 +151,7 @@ nothing. After a longer gap, an item opened and closed in between can be missed.
   closed ones updated in the last `recent_closed_days`, `extras` (`owner/repo#n`), and anything
   already watched that is still open. A closed item's saved state is kept for `baseline_days`
   (90) after it was last checked, so a reopen in that time alerts; after that it seeds quietly;
-- unread GitHub notifications that mention you, request your review, or assign you, in the repos
+- GitHub notifications, read or unread, that mention you, request your review, or assign you, in the repos
   of `repos` and `extras` (`notification_repos` widens or narrows that). This needs the
   `notifications` scope: `gh auth refresh -s notifications` if they come back 403;
 - claim boards defined by a pack (an issue that lists claimable tasks), for `claim_groups`. Only a

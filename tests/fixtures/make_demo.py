@@ -109,7 +109,7 @@ def build(run):
         notes.append(notification("1002", "review_requested", "acme/widgets", "Tighten lint config", "pulls", 14, "2026-01-06T09:00:00Z"))
         notes.append(notification("1003", "subscribed", "acme/widgets", "Weekly digest", "issues", 15, "2026-01-06T09:30:00Z"))
         notes.append(notification("1004", "mention", "acme/gadgets", "Not a watched repo", "issues", 3, "2026-01-06T09:40:00Z"))
-    pages(r, "notifications?participating=true&since=SINCE", notes, per_page=50)
+    pages(r, "notifications?all=true&participating=true&since=SINCE", notes, per_page=50)
     # The client sends params sorted by name; key the recordings the same way.
     return {"responses": {_sorted_key(k): v for k, v in r.items()}}
 

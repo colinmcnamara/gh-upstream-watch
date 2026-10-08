@@ -92,3 +92,19 @@ def test_inline_comments_are_read_only_on_your_own_open_prs_with_a_human_review(
     pr(fake, n=8, reviews=[review(1, "coderabbitai[bot]", "CONTRIBUTOR", "COMMENTED", "2026-10-02T00:00:00Z")])
     core.fingerprint(R, 8, ME, RULES)
     assert not [argv for argv in fake.calls if any("/comments" in a and "/pulls/" in a for a in argv)]
+
+
+def note(nid, updated, unread):
+    return {"id": nid, "reason": "mention", "updated_at": updated, "unread": unread, "repository": {"full_name": R},
+            "subject": {"title": "Fix x", "url": f"https://api.github.com/repos/{R}/issues/5"}}
+
+
+def test_a_thread_you_read_elsewhere_still_alerts_after_the_first_run(fake):
+    fake.responses[NOTES] = [note("1", "t1", unread=False), note("2", "t1", unread=True), note("3", "t2", unread=False)]
+    seen = {"3": "t1"}  # updated and read on another device while only unread threads were polled
+    first = core.notification_asks(seen, 30, 1.7e9, set(), seed_read=True)
+    assert [a["message"] for a in first] == ["someone mentioned you"], "the read backlog is recorded, not alerted"
+    assert seen == {"1": "t1", "2": "t1", "3": "t2"}
+    fake.responses[NOTES][0]["updated_at"] = "t2"  # a new mention, read on your phone before the next run
+    assert len(core.notification_asks(seen, 30, 1.7e9, set())) == 1
+

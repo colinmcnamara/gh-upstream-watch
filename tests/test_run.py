@@ -131,7 +131,7 @@ def test_missing_gh_and_missing_repos_explain_the_next_step(tmp_path, monkeypatc
 
 def test_each_source_seeds_on_its_own(watch):
     """A failing source holds back only its own first-sight alerts; items with a baseline still alert."""
-    notes = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+    notes = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
     code, _, err = watch("run1", responses={notes: {"__error__": "HTTP 500"}})
     assert code == 1 and watch.state()["seeded"] is False and "Still seeding: notifications" in err
     code, out, err = watch("run2")
@@ -350,7 +350,7 @@ def failing_runs(watch, tick, n, responses=None):
     return [(i, line) for i, out in enumerate(outs) for line in out if "not checkable" in line]
 
 
-NOTES_404 = {"notifications?page=1&participating=true&per_page=50&since=SINCE":
+NOTES_404 = {"notifications?all=true&page=1&participating=true&per_page=50&since=SINCE":
              {"__error__": "gh: Not Found (HTTP 404) notifications"}}
 
 
@@ -387,7 +387,7 @@ def test_an_old_config_keeps_the_run_count_rule(watch, monkeypatch, tmp_path):
 
 def test_status_prints_the_fix(watch, capsys):
     watch("run1", "--extra", "acme/widgets#390",
-          responses={"notifications?page=1&participating=true&per_page=50&since=SINCE":
+          responses={"notifications?all=true&page=1&participating=true&per_page=50&since=SINCE":
                      {"__error__": "gh: Not Found (HTTP 404) notifications"}})
     cli.main(["status", "--state", str(watch.path), "--repos", "acme/widgets"])
     out = capsys.readouterr().out
@@ -587,7 +587,7 @@ def test_a_notification_is_never_held_with_a_first_sight_alert(watch, fake):
             "comments": 1, "labels": [], "assignees": []},
         f"{r}/comments?page=1&per_page=100": [{"id": 1, "user": {"login": "maint"}, "body": "/accept", "author_association": "OWNER"}],
         f"{r}/timeline?page=1&per_page=100": [],
-        "notifications?page=1&participating=true&per_page=50&since=SINCE": [
+        "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE": [
             {"id": "n777", "reason": "assign", "updated_at": "2026-10-03T00:00:00Z", "repository": {"full_name": "acme/widgets"},
              "subject": {"title": "New thing", "url": "https://api.github.com/repos/acme/widgets/issues/777"}}]})
     _code, out, _err = watch(None, "--extra", "acme/widgets#777")

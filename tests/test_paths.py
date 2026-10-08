@@ -12,7 +12,7 @@ from test_run import watch  # noqa: F401  (fixture)
 from gh_upstream_watch import cli, core, github, notify, slack, state
 
 R = "acme/widgets"
-NOTES = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+NOTES = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
 
 
 def args(*argv):

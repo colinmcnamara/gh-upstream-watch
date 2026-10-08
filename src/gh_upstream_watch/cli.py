@@ -391,8 +391,10 @@ def run(cfg, a, now=None):
         try:
             alerts += [("notifications", alert(now, **x))
                        for x in core.notification_asks(seen, cfg["retention_days"], now, live, note_repos, me,
-                                                       lambda r: packs.for_repo(rule_packs, r)["quiet_titles"])]
+                                                       lambda r: packs.for_repo(rule_packs, r)["quiet_titles"],
+                                                       seed_read=not st["notifications"].get("read_too"))]
             st["notifications"]["seen"] = seen
+            st["notifications"]["read_too"] = True  # read threads are watched from here on
         except Exception as e:
             unknown("notifications", e)
 

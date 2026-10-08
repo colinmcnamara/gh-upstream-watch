@@ -115,7 +115,7 @@ def test_pending_deployment_reply_names_the_environment(fake):
 
 
 def test_notification_reply_yields_key_and_link(fake):
-    key = "notifications?page=1&participating=true&per_page=50&since=SINCE"
+    key = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
     fake.responses[key] = shape("notifications")
     live: set[str] = set()
     assert core.notification_asks({}, 30, 1.79e9, live, [R]) == [] and live == {"1"}, "subscribed is not an ask"
