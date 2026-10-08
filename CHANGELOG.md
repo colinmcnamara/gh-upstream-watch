@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- On Python 3.9 (stock macOS `python3`), the gh extension's error now names the two quick fixes,
+  `brew install python` or `uv tool install gh-upstream-watch` (uv brings its own Python), before
+  the option to pin v0.3.3.
+
 ## [0.4.2] - 2026-10-05
 
 - Each GitHub Release carries signed build provenance for the wheel and sdist
