@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.3] - 2026-10-08
 
 - On Python 3.9 (stock macOS `python3`), the gh extension's error now names the two quick fixes,
   `brew install python` or `uv tool install gh-upstream-watch` (uv brings its own Python), before
