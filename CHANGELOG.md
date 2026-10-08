@@ -8,6 +8,8 @@
   does not count, because any org member can type `/accept`. A pack gate can name such a label with
   the new `label` key. The label counts only on issues you filed. A gate that first appears on a
   closed item is recorded without an alert.
+- Your own issue or PR closed by someone else without a merge alerts as an action (`closed`), and
+  so does someone else being assigned to it (`assigned_other`).
 - A push after a change request answers it, as a reply does: the head commit's date counts, read
   only while the request is unanswered (one call). "waiting N days" counts it too.
 - A notification thread you already read on your phone or the web still alerts when it updates

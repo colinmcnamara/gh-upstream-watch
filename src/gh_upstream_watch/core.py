@@ -12,7 +12,8 @@ KEEP_IDS = 200
 SETTLED_DAYS = 7  # ponytail: fixed; "referenced by" on an item closed longer than this is dropped
 # Kinds that need you to do something; the rest is information. Alerts carry this as `action`.
 ACTION_KINDS = {"gate", "competing_pr", "reopened", "assigned", "label_rule", "claimable", "notification",
-                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict", "approval"}
+                "mentions", "slack", "stuck", "changes_requested", "ci_failed", "conflict", "approval",
+                "closed", "assigned_other"}
 
 
 def plural(n, word):
@@ -150,7 +151,7 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
                  if c.get("author_association") == "CONTRIBUTOR" and not is_bot(who(c), bots)]
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
-        "closed_at": i.get("closed_at"),
+        "closed_at": i.get("closed_at"), "closed_by": (i.get("closed_by") or {}).get("login"),
         "labels": sorted(label["name"] for label in i["labels"]),
         "assignees": sorted(a["login"] for a in i.get("assignees") or []),
         "comments": len(comments),
@@ -317,6 +318,9 @@ def changes(old, new, me, rules):
         return out
     if me in new["assignees"] and me not in old.get("assignees", []):
         out.append(("assigned", msg.get("assigned", "ASSIGNED to you"), None))
+    others = sorted(set(new["assignees"]) - set(old.get("assignees", [])) - {me})
+    if others and new.get("author") == me:  # someone else on your own issue or PR: did they take it over?
+        out.append(("assigned_other", f"ASSIGNED to @{', @'.join(others)}: check whether they took it over", None))
     for t in rules["label_transitions"]:
         def holds(fp, t=t):
             labels = set(fp.get("labels", []))
@@ -327,7 +331,10 @@ def changes(old, new, me, rules):
     if old.get("state") == "closed" and new["state"] == "open" and me not in new["assignees"]:
         out.append(("reopened", msg.get("reopened", "REOPENED"), None))
     elif old.get("state") != new["state"] and not (new.get("merged") and not old.get("merged")):
-        out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
+        if new["state"] == "closed" and new.get("author") == me and new.get("closed_by") not in (None, me):
+            out.append(("closed", f"CLOSED by @{new['closed_by']} without merging: check why", None))
+        else:
+            out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
     loud = lambda labels: {x for x in labels if not any(r.search(x) for r in rules.get("quiet_labels", []))}  # noqa: E731
     added = sorted(loud(new["labels"]) - loud(old.get("labels", [])))
     removed = sorted(loud(old.get("labels", [])) - loud(new["labels"]))

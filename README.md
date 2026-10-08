@@ -260,8 +260,8 @@ One JSON object per alert (the webhook sends it as `alert`). These fields are st
 | field | meaning |
 | --- | --- |
 | `v` | shape version, `1` |
-| `kind` | `gate`, `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `assigned`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed`, `ci_passed`, `ci_waiting`, `conflict`, `approval`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
-| `action` | `true` when it needs you to do something: `gate`, `competing_pr`, `reopened`, `assigned`, `label_rule`, `claimable`, `notification`, `mentions`, `slack`, `stuck`, `changes_requested`, `ci_failed`, `conflict`, `approval` |
+| `kind` | `gate`, `gate_done`, `competing_pr`, `reference`, `reopened`, `state`, `closed`, `assigned`, `assigned_other`, `label_rule`, `labels`, `merged`, `milestone`, `review`, `changes_requested`, `ci_failed`, `ci_passed`, `ci_waiting`, `conflict`, `approval`, `comments`, `mentions`, `notification`, `claimable`, `gone`, `stuck`, `slack`, or a hook's own kind |
+| `action` | `true` when it needs you to do something: `gate`, `competing_pr`, `reopened`, `assigned`, `label_rule`, `claimable`, `notification`, `mentions`, `slack`, `stuck`, `changes_requested`, `ci_failed`, `conflict`, `approval`, `closed`, `assigned_other` |
 | `key` | `owner/repo#n` for an item; otherwise `owner/repo TYPE ID` for a notification about something else (a discussion, a release), the source (`stuck`), `owner/repo run ID` (`approval`), or the Slack `channel:ts` |
 | `title`, `message` | the human text; the text line is `title: message (url)` |
 | `url` | a `https://github.com/` or `https://*.slack.com/` link, or empty; a hook's alerts carry its own |

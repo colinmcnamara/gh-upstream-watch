@@ -124,3 +124,32 @@ def test_the_head_commit_is_read_only_while_a_change_request_is_unanswered(fake)
     core.fingerprint(R, 7, ME, RULES)
     assert ["api", "--method", "GET", f"repos/{R}/commits/abc"] not in [argv[1:] for argv in fake.calls]
 
+
+def issue_fp(fake, author=ME, closed_by=None, state="open", assignees=()):
+    fake.responses.update({
+        f"repos/{R}/issues/5": {"number": 5, "title": "Bug", "html_url": f"https://github.com/{R}/issues/5", "state": state,
+                                "comments": 0, "labels": [], "assignees": [{"login": a} for a in assignees],
+                                "user": {"login": author}, "created_at": "2026-10-01T00:00:00Z", "body": "",
+                                "closed_by": {"login": closed_by} if closed_by else None},
+        f"repos/{R}/issues/5/timeline?page=1&per_page=100": [],
+    })
+    return core.fingerprint(R, 5, ME, RULES)
+
+
+def test_your_item_closed_by_someone_else_needs_you(fake):
+    old = issue_fp(fake)
+    new = issue_fp(fake, state="closed", closed_by="maint")
+    assert ("closed", "CLOSED by @maint without merging: check why", None) in core.changes(old, new, ME, RULES)
+    assert "closed" in core.ACTION_KINDS
+    mine = issue_fp(fake, state="closed", closed_by=ME)
+    assert ("state", "closed", None) in core.changes(old, mine, ME, RULES), "you closed it: news, not an ask"
+
+
+def test_someone_else_assigned_to_your_item_needs_you(fake):
+    old = issue_fp(fake)
+    new = issue_fp(fake, assignees=["rival"])
+    assert ("assigned_other", "ASSIGNED to @rival: check whether they took it over", None) in core.changes(old, new, ME, RULES)
+    assert "assigned_other" in core.ACTION_KINDS
+    theirs_old, theirs_new = issue_fp(fake, author="someone"), issue_fp(fake, author="someone", assignees=["rival"])
+    assert not [a for a in core.changes(theirs_old, theirs_new, ME, RULES) if a[0] == "assigned_other"]
+
