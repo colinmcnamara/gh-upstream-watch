@@ -11,7 +11,7 @@ RULES = packs.for_repo(packs.load([]), R)
 NOTES = "notifications?all=true&page=1&participating=true&per_page=50&since=SINCE"
 
 
-def pr(fake, n=7, author=ME, comments=(), reviews=(), inline=None, state="open"):
+def pr(fake, n=7, author=ME, comments=(), reviews=(), inline=None, state="open", head=None):
     fake.responses.update({
         f"repos/{R}/issues/{n}": {"number": n, "title": "Fix", "html_url": f"https://github.com/{R}/pull/{n}",
                                   "state": state, "comments": len(comments), "labels": [], "assignees": [],
@@ -19,7 +19,10 @@ def pr(fake, n=7, author=ME, comments=(), reviews=(), inline=None, state="open")
                                   "pull_request": {}},
         f"repos/{R}/issues/{n}/comments?page=1&per_page=100": list(comments),
         f"repos/{R}/issues/{n}/timeline?page=1&per_page=100": [],
-        f"repos/{R}/pulls/{n}": {"merged": False, "mergeable_state": "clean"},
+        f"repos/{R}/pulls/{n}": {"merged": False, "mergeable_state": "clean", **({"head": {"sha": head}} if head else {})},
+        f"repos/{R}/commits/{head}/check-runs?page=1&per_page=100": {"check_runs": [], "total_count": 0},
+        f"repos/{R}/actions/runs?head_sha={head}&per_page=100": {"workflow_runs": []},
+        f"repos/{R}/commits/{head}/status": {"state": "pending", "total_count": 0},
         f"repos/{R}/pulls/{n}/reviews?page=1&per_page=100": list(reviews),
     })
     if inline is not None:
@@ -107,4 +110,17 @@ def test_a_thread_you_read_elsewhere_still_alerts_after_the_first_run(fake):
     assert seen == {"1": "t1", "2": "t1", "3": "t2"}
     fake.responses[NOTES][0]["updated_at"] = "t2"  # a new mention, read on your phone before the next run
     assert len(core.notification_asks(seen, 30, 1.7e9, set())) == 1
+
+
+def test_your_push_after_a_change_request_answers_it(fake):
+    pr(fake, reviews=[review(1, "maint", "COLLABORATOR", "CHANGES_REQUESTED", "2026-10-02T00:00:00Z")], inline=[], head="abc")
+    fake.responses[f"repos/{R}/commits/abc"] = {"commit": {"committer": {"date": "2026-10-03T00:00:00Z"}}}
+    fp = core.fingerprint(R, 7, ME, RULES)
+    assert fp["pushed_at"] == "2026-10-03T00:00:00Z" and reasons(fp) == []
+
+
+def test_the_head_commit_is_read_only_while_a_change_request_is_unanswered(fake):
+    pr(fake, reviews=[review(1, "maint", "COLLABORATOR", "APPROVED", "2026-10-02T00:00:00Z")], inline=[], head="abc")
+    core.fingerprint(R, 7, ME, RULES)
+    assert ["api", "--method", "GET", f"repos/{R}/commits/abc"] not in [argv[1:] for argv in fake.calls]
 

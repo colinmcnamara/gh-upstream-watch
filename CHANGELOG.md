@@ -8,6 +8,8 @@
   does not count, because any org member can type `/accept`. A pack gate can name such a label with
   the new `label` key. The label counts only on issues you filed. A gate that first appears on a
   closed item is recorded without an alert.
+- A push after a change request answers it, as a reply does: the head commit's date counts, read
+  only while the request is unanswered (one call). "waiting N days" counts it too.
 - A notification thread you already read on your phone or the web still alerts when it updates
   (`all=true`). The first run after the upgrade records the threads already read without alerting.
 - Review bodies and inline review comments are read for mentions. An inline reply naming you after

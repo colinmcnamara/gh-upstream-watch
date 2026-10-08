@@ -217,6 +217,11 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
+            # A push answers a change request as well as a reply does. One call, only while it is unanswered.
+            cr = fp.get("changes_requested")
+            if cr and sha and fp["state"] == "open" and (fp["my_at"] or "") < cr["at"]:
+                fp["pushed_at"] = (((github.gh_get(f"repos/{repo}/commits/{sha}").get("commit") or {})
+                                    .get("committer") or {}).get("date"))
     # Only on your own work, the only place `inbox` shows it, and only unlabeled touches that would move
     # the latest touch (or the latest word), newest first.
     def latest(words):
