@@ -206,6 +206,14 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
                     if r.get("author_association") in TRUSTED and not is_bot(who(r), bots)]
         unlabeled += [(r.get("submitted_at"), who(r), r["state"] == "COMMENTED") for r in reviews
                       if r.get("author_association") == "CONTRIBUTOR" and not is_bot(who(r), bots)]
+        # Mentions in review bodies and inline review comments (semantic-router#4658). Inline comments
+        # cost a call, so only on your own open PR with a human review: elsewhere notifications cover them.
+        talk = [r for r in reviews if not is_bot(who(r), bots)]
+        if talk and fp["author"] == me and fp["state"] == "open":
+            talk += [c for c in github.paginate(f"repos/{repo}/pulls/{n}/comments")
+                     if who(c) != me and not is_bot(who(c), bots)]
+        named = [x.get("submitted_at") or x.get("created_at") or "" for x in talk if mentions(visible(x.get("body")), me)]
+        fp["mention_at"] = max([fp["mention_at"] or "", *named]) or None
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None

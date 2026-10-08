@@ -31,6 +31,7 @@ def pr_responses(fake, author=ME, mergeable="clean", runs=(), checks=(), status=
              "submitted_at": "2026-09-02T00:00:00Z"},
             {"id": 2, "user": {"login": ME}, "state": "COMMENTED", "author_association": "CONTRIBUTOR",
              "submitted_at": "2026-09-05T00:00:00Z"}],
+        f"repos/{R}/pulls/7/comments?page=1&per_page=100": [],
         f"repos/{R}/commits/{SHA}/check-runs?page=1&per_page=100": {"check_runs": list(checks), "total_count": len(checks)},
         f"repos/{R}/actions/runs?head_sha={SHA}&per_page=100": {"workflow_runs": list(runs)},
         f"repos/{R}/commits/{SHA}/status": {"state": status, "total_count": statuses},

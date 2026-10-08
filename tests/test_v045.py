@@ -65,3 +65,30 @@ def test_only_your_own_items_wait_on_you_for_a_maintainer_reply(fake):
     pr(fake, author="someone", comments=[comment(1, ME, "NONE", "2026-09-27T10:00:00Z"),
                                          comment(2, "maint", "COLLABORATOR", "2026-09-28T00:00:00Z")])
     assert reasons(core.fingerprint(R, 7, ME, RULES)) == []
+
+
+def test_an_inline_review_comment_naming_you_is_an_unanswered_mention(fake):
+    """semantic-router#4658: 1fanwang's 16:11 inline reply "@you option 2, please" came after your 13:57 reply."""
+    pr(fake, reviews=[review(1, "Xunzhuo", "MEMBER", "CHANGES_REQUESTED", "2026-10-08T09:00:36Z", "Thanks for the regression."),
+                      review(2, ME, "CONTRIBUTOR", "COMMENTED", "2026-10-08T13:57:02Z"),
+                      review(3, "1fanwang", "COLLABORATOR", "COMMENTED", "2026-10-08T16:11:25Z")],
+       inline=[comment(10, ME, "CONTRIBUTOR", "2026-10-08T13:57:02Z", "Thanks, the short-think delta is real"),
+               comment(11, "1fanwang", "COLLABORATOR", "2026-10-08T16:11:25Z", "@octocat option 2, please")])
+    fp = core.fingerprint(R, 7, ME, RULES)
+    assert fp["mention_at"] == "2026-10-08T16:11:25Z"
+    assert reasons(fp) == ["unanswered mention"]
+
+
+def test_a_review_body_naming_you_is_a_mention(fake):
+    pr(fake, comments=[comment(1, ME, "NONE", "2026-10-01T00:00:00Z")],
+       reviews=[review(2, "maint", "COLLABORATOR", "COMMENTED", "2026-10-02T00:00:00Z", "@octocat can you split this?")],
+       inline=[])
+    assert core.fingerprint(R, 7, ME, RULES)["mention_at"] == "2026-10-02T00:00:00Z"
+
+
+def test_inline_comments_are_read_only_on_your_own_open_prs_with_a_human_review(fake):
+    pr(fake, author="someone", reviews=[review(1, "maint", "COLLABORATOR", "COMMENTED", "2026-10-02T00:00:00Z")])
+    core.fingerprint(R, 7, ME, RULES)
+    pr(fake, n=8, reviews=[review(1, "coderabbitai[bot]", "CONTRIBUTOR", "COMMENTED", "2026-10-02T00:00:00Z")])
+    core.fingerprint(R, 8, ME, RULES)
+    assert not [argv for argv in fake.calls if any("/comments" in a and "/pulls/" in a for a in argv)]
