@@ -22,8 +22,7 @@ def note(title="Keep null stop fields", latest=None, n=56376, kind="pulls", reas
 
 def asks(fake, *notes, seen=None):
     fake.responses[NOTES] = list(notes)
-    return core.notification_asks(seen if seen is not None else {}, 30, 1.79e9, set(), ("*",), ME,
-                                  lambda r: RULES["quiet_titles"])
+    return core.notification_asks(seen if seen is not None else {}, 30, 1.79e9, set(), ("*",), ME)
 
 
 def test_a_mention_says_who_and_what_from_the_latest_comment(fake):
@@ -190,8 +189,8 @@ def test_an_old_body_mention_does_not_vouch_for_later_posts(fake):
     later = asks(fake, note(BOARD, L70, 3983, "issues"), seen={"n1": "2026-09-30T00:00:00Z"})
     assert later == [], "the body is older than the last update already handled"
     fake.responses[NOTES] = [note(BOARD, "https://api.github.com/repos/acme/widgets/issues/3983", 3983, "issues")]
-    got = core.notification_asks({}, 30, 1.79e9, set(), ("*",), ME, lambda r: RULES["quiet_titles"])
-    assert got and got[0]["message"].startswith("@lead mentioned you"), "when GitHub's latest event is the body, it counts"
+    got = core.notification_asks({}, 30, 1.79e9, set(), ("*",), ME)
+    assert got and got[0]["message"].startswith("@lead mentioned you"), "a thread seen first reads a body from the window"
 
 
 # --- red team of 0.2.3 (Opus) --------------------------------------------------------------------
@@ -213,7 +212,7 @@ def test_the_window_is_the_last_handled_update_not_three_days(fake):
 
 
 def test_a_quiet_pr_without_a_comment_naming_you_alerts(fake):
-    """M2: a PR's ask may be in a review this tool does not read: unknown, so it alerts."""
+    """M2: a PR's ask may be in a review; when the reviews cannot be read it is unknown, so it alerts."""
     fake.responses["repos/acme/widgets/issues/9/comments?per_page=100&since=SINCE"] = [{"user": {"login": "x"}, "body": "+1"}]
     fake.responses["repos/acme/widgets/issues/9"] = {"user": {"login": "x"}, "body": "a PR", "created_at": "2020-01-01T00:00:00Z"}
     got = asks(fake, note(BOARD, "https://api.github.com/repos/acme/widgets/pulls/9", 9, "pulls"),
@@ -293,7 +292,7 @@ def test_a_mention_already_handled_is_not_found_again(fake):
 # --- red team of 0.2.3 (Codex, Grok) ------------------------------------------------------------
 
 def test_an_unexplained_update_on_a_quiet_thread_alerts(fake):
-    """Grok 5: no latest comment from GitHub (a body edit, say) and nothing found: unknown, so alert."""
+    """Grok 5: no latest comment from GitHub, nothing found, and the item itself unreadable: unknown, so alert."""
     fake.responses["repos/acme/widgets/issues/3983/comments?per_page=100&since=SINCE"] = []
     assert [a["message"] for a in asks(fake, note(BOARD, None, 3983, "issues"), seen={"n1": "2026-09-30T00:00:00Z"})] == \
         ["someone mentioned you"]

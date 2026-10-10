@@ -133,6 +133,9 @@ def prune(st, now, retention_days, live=()):
     n = st["notifications"]["seen"]
     for k in [k for k, v in n.items() if k not in live and (_epoch(v) or now) < cutoff]:
         del n[k]
+    named = st["notifications"].get("named", {})
+    for k in [k for k in named if k not in n]:
+        del named[k]
     for store in (st["claimable"]["seen"], st["approvals"]["seen"], st["slack"].get("seen", {})):
         for k in [k for k, v in store.items() if k not in live and isinstance(v, (int, float)) and v < cutoff]:
             del store[k]

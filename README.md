@@ -49,8 +49,9 @@ gh-upstream-watch init --repos OWNER/REPO --schedule  # then a run every 15 minu
    later complete run.
 4. **Quiet by default.** The first run only records what it sees (one "seed run" line on stderr);
    the one exception is a release waiting for your approval, which cannot wait. Bots are filtered
-   from comment counts, and megathreads you list (for example `[Community]` issues) alert only on
-   comments that `@`-name you, or on a gate.
+   from comment counts, and a mention alerts only when something new `@`-names you: GitHub keeps
+   a thread's reason "mention" for every later update. Megathreads you list (for example
+   `[Community]` issues) alert only on such a mention, or on a gate.
 
 ## Demo
 
@@ -84,7 +85,7 @@ uv tool install gh-upstream-watch
 # or
 pipx install gh-upstream-watch
 # or, as a gh extension (runs from a checkout with your python3, 3.10 or newer):
-gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.5   # then: gh upstream-watch --help
+gh extension install colinmcnamara/gh-upstream-watch --pin v0.4.6   # then: gh upstream-watch --help
 ```
 
 `--pin` holds the extension at a release tag; without it, `gh extension upgrade` runs whatever is on
@@ -245,10 +246,12 @@ attempts in all, without printing it again. Only `https://github.com/` links (an
 points elsewhere is replaced by the item's own URL.
 
 A mention says who and what (`@maint mentioned you: "can you rebase on main?"`) and links to the
-comment; when that lookup fails, it says "someone mentioned you" and links to the item. On a
-quiet-title thread (a megathread), a mention alerts only when a comment really names you, or when
-that lookup fails: GitHub keeps calling every later post in a thread you were once named in a
-"mention". A notification
+comment; when that lookup fails, it says "someone mentioned you" and links to the item. GitHub
+keeps a thread's reason for every later update (CI, a label, an approval, the merge), so a mention
+alerts only when a comment, a review, an inline review comment, or the body of an item new since the
+last update names you, or when the lookup fails. A review or body edited to add your name counts:
+the state remembers which ones already named you. An assignment alerts only when you were assigned
+since the last update. A notification
 about an item that also changed this run joins that item's line instead of adding a second one.
 "Referenced by" alerts stop on quiet threads and on items closed more than 7 days ago; a PR that
 says it closes your item always alerts.
@@ -336,7 +339,8 @@ an alert. A failing hook makes that item unknown for the run, so nothing is lost
 ## Reliability
 
 - Full pagination for search, comments, reviews, timeline and notifications. (A mention's lookup
-  reads one page of a thread's comments, then falls back to "someone mentioned you".) A search
+  reads one page each of a thread's comments, reviews and inline comments, then falls back to
+  "someone mentioned you".) A search
   over GitHub's 1,000-result cap is reported as unknown with a warning.
 - One failing item never loses the run; the state file is always saved.
 - Each source (a repo's search, an extra, notifications, a claim board) seeds on its own first
