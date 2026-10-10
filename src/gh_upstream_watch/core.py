@@ -152,6 +152,7 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
     fp = {
         "title": i["title"], "url": i["html_url"], "pr": "pull_request" in i, "state": i["state"],
         "closed_at": i.get("closed_at"), "closed_by": (i.get("closed_by") or {}).get("login"),
+        "state_reason": i.get("state_reason"),
         "labels": sorted(label["name"] for label in i["labels"]),
         "assignees": sorted(a["login"] for a in i.get("assignees") or []),
         "comments": len(comments),
@@ -324,14 +325,16 @@ def changes(old, new, me, rules):
     for t in rules["label_transitions"]:
         def holds(fp, t=t):
             labels = set(fp.get("labels", []))
-            return ((not t.get("assigned_to_me") or me in fp.get("assignees", []))
+            return (fp.get("state") == "open" and (not t.get("assigned_to_me") or me in fp.get("assignees", []))
                     and set(t.get("has", [])) <= labels and not set(t.get("lacks", [])) & labels)
         if holds(new) and not holds(old):
             out.append(("label_rule", t["alert"], None))
     if old.get("state") == "closed" and new["state"] == "open" and me not in new["assignees"]:
         out.append(("reopened", msg.get("reopened", "REOPENED"), None))
     elif old.get("state") != new["state"] and not (new.get("merged") and not old.get("merged")):
-        if new["state"] == "closed" and new.get("author") == me and new.get("closed_by") not in (None, me):
+        # Closed as completed is done (a merged PR that closes it, say), not an ask: semantic-router#4555.
+        if (new["state"] == "closed" and new.get("author") == me and new.get("closed_by") not in (None, me)
+                and (new.get("pr") or new.get("state_reason") != "completed")):
             out.append(("closed", f"CLOSED by @{new['closed_by']} without merging: check why", None))
         else:
             out.append(("state", "reopened" if new["state"] == "open" else "closed", None))
@@ -433,11 +436,13 @@ def around(body, me, n=100):
     return ("…" if start else "") + (out if start + n >= len(text) else out.rstrip() + "…")
 
 
-def who_named_me(n, me, since, budget):
+def who_named_me(n, me, since, budget, record=None):
     """(login, comment-or-item, other logins) for the place in this notification's thread that @-names
     you since `since`, preferring a maintainer's mention over anyone else's. None when nothing names
-    you; UNKNOWN when it could not fully look (a failed or capped lookup, a discussion, a PR whose
-    reviews it does not read, more comments than one page)."""
+    you; UNKNOWN when it could not fully look (a failed or capped lookup, a discussion, more than one
+    page of comments or reviews). `record` (thread id to the review ids and "body" that named you at
+    the last look, updated in place) makes an edit that adds your name news: a review and a body keep
+    their old timestamps when edited. A comment's edit moves its `updated_at`, so it needs no record."""
     subject = n.get("subject") or {}
     latest = subject.get("latest_comment_url") or ""
     api = subject.get("url") or ""
@@ -447,39 +452,84 @@ def who_named_me(n, me, since, budget):
     if budget[0] <= 0:
         return UNKNOWN
     budget[0] -= 1
+    names = lambda c: mentions(visible(c.get("body")), me) and who(c) != me  # noqa: E731
+    before = None if record is None else record.get(n.get("id"))  # None: no record yet, go by time
     try:
         found = []
         if "/comments/" in latest:
             found.append(github.gh_get(latest.replace("https://api.github.com/", "")))
-        # One page of comments since the last update this tool handled: a megathread is never read whole.
-        try:
-            page = github.gh_get(f"{thread}/comments", {"since": since, "per_page": 100}) or []
-        except github.GHError:
-            if not found:
-                raise
-            page = []  # the latest comment already answers who; the page only refines it
-        found += page
-        # Strictly newer than the last handled update: a mention already alerted is not found again.
-        newer = [c for c in found if _epoch(c.get("updated_at") or c.get("created_at") or "") > _epoch(since)]
-        named = [c for c in newer if mentions(visible(c.get("body")), me) and who(c) != me]
+        # One page of each list since the last update this tool handled: a megathread is never read
+        # whole. A PR's ask may also be in a review body or an inline review comment. Reviews have no
+        # `since`, so they are read whole: a busy PR passes 100, since every lone inline reply is one.
+        pull = api.replace("https://api.github.com/", "")
+        lists = [(f"{thread}/comments", True)]
+        if "/pulls/" in api:
+            lists += [(f"{pull}/reviews", False), (f"{pull}/comments", True)]
+        blind = False  # a list not read whole, or not read: never conclude nobody named you
+        for path, windowed in lists:
+            try:
+                page = github.gh_get(path, {"since": since, "per_page": 100}) or [] if windowed else github.paginate(path)
+                if not isinstance(page, list):
+                    raise github.GHError(f"{path}: expected a list, got {type(page).__name__}")
+            except github.GHError:
+                if not found:
+                    raise
+                page, blind = [], True  # the latest comment may still answer who
+            found += page
+            blind = blind or (windowed and len(page) >= 100)
+        places = {f"review:{c.get('id')}" for c in found if "submitted_at" in c and names(c)}
+        # Strictly newer than the last handled update, or a review that newly names you: a mention
+        # already alerted is not found again.
+        named = [c for c in found if names(c) and (_epoch(_at(c)) > _epoch(since) or
+                 ("submitted_at" in c and before is not None and f"review:{c.get('id')}" not in before))]
+        read_body = False
+        if not named and not blind:
+            # The body counts when the item is new since `since` (strictly: GitHub's first update of a
+            # new item carries its creation time), or it newly names you. GitHub points
+            # latest_comment_url at the item itself for any update that is not a comment (CI, a label,
+            # a merge), so that never meant the body changed: semantic-router#4658 raised 21
+            # "mentioned you" in a day that way.
+            item, read_body = github.gh_get(thread), True
+            if names(item):
+                places.add("body")
+                if ("body" not in before) if before is not None else _epoch(item.get("created_at")) > _epoch(since):
+                    named = [item]
+        elif "body" in (before or ()):
+            places.add("body")  # not read this time: keep what was known
+        # A record starts only from a complete look: one missing the body or a review would make an
+        # old mention look new next time.
+        if record is not None and n.get("id") and (before is not None or read_body):
+            record[n["id"]] = sorted(places | (set(before or ()) if blind else set()))
         if named:
-            named.sort(key=lambda c: c.get("created_at") or "")
+            named.sort(key=_at)
             pick = next((c for c in reversed(named) if c.get("author_association") in TRUSTED), named[-1])
             others = sorted({who(c) for c in named} - {who(pick)})
             return who(pick), pick, others
-        if len(page) >= 100 or "/pulls/" in api:
-            return UNKNOWN  # more than one page, or a PR's reviews: never conclude nobody named you
-        # The body counts only when it is the news: new since `since`, or GitHub's latest event is the
-        # body itself. A megathread body that always named you does not vouch for every later post.
-        item = github.gh_get(thread)
-        fresh = latest.rstrip("/") == api.rstrip("/") or _epoch(item.get("created_at")) >= _epoch(since)
-        if fresh and mentions(visible(item.get("body")), me) and who(item) != me:
-            return who(item), item, []
-        if "/comments/" not in latest and not fresh:
-            return UNKNOWN  # GitHub did not say what changed (a body edit, say): do not conclude nobody
+        if blind:
+            return UNKNOWN
     except github.GHError:
         return UNKNOWN
     return None
+
+
+def assigned_since(n, me, since, budget):
+    """True when the thread has an `assigned` event for you after `since`, False when it has none,
+    UNKNOWN when it could not look (a discussion, a failed or capped lookup)."""
+    thread = ((n.get("subject") or {}).get("url") or "").replace("https://api.github.com/", "").replace("/pulls/", "/issues/")
+    if "/issues/" not in thread or budget[0] <= 0:
+        return UNKNOWN
+    budget[0] -= 1
+    try:
+        events = github.paginate(f"{thread}/events")
+    except github.GHError:
+        return UNKNOWN
+    return any(e.get("event") == "assigned" and (e.get("assignee") or {}).get("login", "").lower() == me.lower()
+               and _epoch(e.get("created_at")) > _epoch(since) for e in events)
+
+
+def _at(c):
+    """When a comment, review or inline comment last changed: reviews only have `submitted_at`."""
+    return c.get("updated_at") or c.get("created_at") or c.get("submitted_at") or ""
 
 
 def _epoch(iso):
@@ -489,12 +539,14 @@ def _epoch(iso):
         return time.time()
 
 
-def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, quiet=lambda repo: (), seed_read=False):
+def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, seed_read=False, record=None):
     """Notifications, any repo, read or not, where someone asked for you; once per update. A thread you
     read on your phone or the web still alerts. `seed_read` (the first run that reads read threads)
     records the ones already read without alerting, so the backlog in the window does not flood you. Mentions say who
-    and what. On a quiet-title thread (a megathread) a mention alerts only when a comment really
-    names you: GitHub keeps calling every later post in a thread you were named in a "mention".
+    and what. GitHub keeps a thread's reason for every later update (CI, a label, a merge), so a
+    mention alerts only when something new names you, and an assignment only when you were assigned
+    since; a lookup that could not finish still alerts. `record` remembers, per thread, the reviews
+    and body that named you (see who_named_me).
     Every id GitHub still returns goes into `live`, so pruning never forgets it."""
     since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - retention_days * 86400))
     fresh, budget = [], [LOOKUPS_PER_RUN]
@@ -517,10 +569,11 @@ def notification_asks(seen, retention_days, now, live, repos=("*",), me=None, qu
         kind = subject.get("type") or ("PullRequest" if "/pulls/" in (subject.get("url") or "") else "Issue")
         key = f"{repo}#{number}" if number.isdigit() and kind in ("Issue", "PullRequest") else f"{repo} {kind.lower()} {number}".strip()
         verb = ASKS[n["reason"]]
-        named = who_named_me(n, me, prev, budget) if me and n["reason"] == "mention" else None
-        # Only a plain mention is filtered on a megathread, and only when we looked and nobody named
-        # you. Review requests, assignments and team mentions always alert; so does a failed lookup.
-        if n["reason"] == "mention" and named is None and any(r.search(title) for r in quiet(repo)):
+        named = who_named_me(n, me, prev, budget, record) if me and n["reason"] == "mention" else None
+        # We looked and nothing new names you, or nobody assigned you since. Review requests and team
+        # mentions always alert.
+        if me and ((n["reason"] == "mention" and named is None) or
+                   (n["reason"] == "assign" and assigned_since(n, me, prev, budget) is False)):
             continue
         named = None if named == UNKNOWN else named
         also = f" (also @{', @'.join(named[2])})" if named and named[2] else ""

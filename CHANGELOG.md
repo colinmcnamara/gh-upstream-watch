@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.4.6] - 2026-10-10
+
+- A mention alerts only when something new names you. GitHub keeps a thread's reason "mention" for
+  every later update (CI, a label, an approval, the merge), so semantic-router#4658 raised 21
+  "someone mentioned you" in a day with one real mention among them. The lookup now reads a PR's
+  reviews and inline comments too, and when nothing since the last handled update names you, the
+  update is not an alert, on any thread, not only a megathread. Replaying the logged alerts on
+  #4658, #4802 and #4539: 34 become 3, each saying who asked. A lookup that cannot finish still
+  alerts.
+- An item's body counts as a mention only when the item is new since the last handled update, or
+  it newly names you. GitHub points `latest_comment_url` at the item itself for any update that is
+  not a comment, so that never meant the body changed. The state remembers, per thread, which
+  reviews and body named you (`notifications.named`), so a review or body edited to add your name
+  still alerts though its timestamp is old (found by Codex in review).
+- An assignment notification alerts only when the thread has an `assigned` event for you since the
+  last handled update (one call); #4555 said "someone assigned you" again when it closed.
+- Your issue closed as completed (by the merged PR that fixes it, say) is news, not "CLOSED without
+  merging: check why".
+- Label rules (`IN-PROGRESS label missing`, `NEEDS REBASE`) apply only to open items.
+- From review (Codex, Opus): a record starts only from a complete look; a new item's body alerts
+  once; a PR's reviews are read whole (a busy PR passes 100, every lone inline reply being one), so
+  it is not "unknown" on every update; a reply that is not a list makes the lookup unknown instead
+  of failing the notifications source; your PR closed without merging alerts whatever its reason.
+
 ## [0.4.5] - 2026-10-08
 
 - `inbox` puts your own open item under what waits on you when a maintainer's last comment or
