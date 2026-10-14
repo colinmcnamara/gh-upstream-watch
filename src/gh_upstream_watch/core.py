@@ -104,7 +104,13 @@ def cross_refs(repo, n, me):
 def fingerprint(repo, n, me, rules, bots=(), mergers=None):
     """Everything about repo#n that can change. Raises GHError if any page fails.
     `mergers` holds merged_here answers; a run passes the ones saved in its state."""
-    i = github.gh_get(f"repos/{repo}/issues/{n}")  # NotFound here means the item is gone
+    try:
+        i = github.gh_get(f"repos/{repo}/issues/{n}")
+    except github.NotFound:
+        # A repo with issues turned off 404s every issues/ path while
+        # pulls/ still reads: take the PR, without the issue comments and timeline it cannot read.
+        pr = github.gh_get(f"repos/{repo}/pulls/{n}")  # NotFound here too means the item is gone
+        i = {**pr, "pull_request": {"url": pr.get("url")}, "comments": 0, "issues_off": True}
     try:
         return _fingerprint(i, repo, n, me, rules, bots, {} if mergers is None else mergers)
     except github.NotFound as e:
@@ -164,7 +170,7 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         "human_ids": humans[-KEEP_IDS:],
         "mention_ids": [c["id"] for c in others if mentions(c.get("body"), me)],  # few: no cap, so edits are seen
         "gates": {},
-        "xrefs": cross_refs(repo, n, me),
+        "xrefs": [] if i.get("issues_off") else cross_refs(repo, n, me),
         "author": who(i), "created_at": i.get("created_at"),
         "my_at": max((c.get("created_at") or "" for c in mine), default=None),
         # When the latest comment naming you was written. Not edited: a roll call re-edited weekly is not
@@ -218,7 +224,12 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         fp["mention_at"] = max([fp["mention_at"] or "", *named]) or None
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
-            fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
+            try:
+                fp["ci"] = ci_status(repo, sha) if fp["state"] == "open" and sha else None
+            except github.NotFound:
+                if not i.get("issues_off"):
+                    raise
+                fp["ci"] = None  # issues off and the CI reads 404 too: a repo that runs no CI, not unknown
             # A push answers a change request as well as a reply does. One call, only while it is unanswered.
             cr = fp.get("changes_requested")
             if cr and sha and fp["state"] == "open" and (fp["my_at"] or "") < cr["at"]:

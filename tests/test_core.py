@@ -165,6 +165,30 @@ def test_bots_are_not_people(fake):
     assert (fp["comments"], fp["human_comments"], fp["mentions_me"]) == (4, 1, 1)
 
 
+def test_pr_in_a_repo_with_issues_off_reads_through_pulls(fake):
+    # Issues turned off: every issues/ path 404s, pulls/ still reads.
+    r = "repos/acme/widgets/pulls/391"
+    fake.responses = {
+        r: {"title": "t", "html_url": "https://github.com/acme/widgets/pull/391", "url": f"https://api.github.com/{r}",
+            "state": "open", "labels": [], "assignees": [], "comments": 2, "user": {"login": ME}, "head": {"sha": "abc"}},
+        f"{r}/reviews?page=1&per_page=100": [{"id": 7, "user": {"login": "maint"}, "state": "APPROVED",
+                                              "author_association": "MEMBER", "submitted_at": "2026-01-02T00:00:00Z"}],
+        f"{r}/comments?page=1&per_page=100": []}
+    fp = core.fingerprint("acme/widgets", 391, ME, GENERIC)
+    assert (fp["pr"], fp["state"], fp["comments"], fp["xrefs"], fp["ci"]) == (True, "open", 0, [], None)
+    assert fp["reviews"] == [[7, "maint", "APPROVED"]]
+    assert not [c for c in fake.calls if "issues/391/" in " ".join(c)], "no issue comments or timeline reads"
+    issue = {"title": "t", "html_url": "https://github.com/acme/widgets/pull/391", "state": "open", "labels": [],
+             "assignees": [], "comments": 0, "user": {"login": ME}, "pull_request": {}}
+    fake.responses = {**fake.responses, "repos/acme/widgets/issues/391": issue,
+                      "repos/acme/widgets/issues/391/timeline?page=1&per_page=100": []}
+    with pytest.raises(github.GHError):
+        core.fingerprint("acme/widgets", 391, ME, GENERIC)  # issues on: a CI 404 is still unknown, never "no CI"
+    fake.responses = {}
+    with pytest.raises(github.NotFound):
+        core.fingerprint("acme/widgets", 391, ME, GENERIC)  # gone from both: still gone
+
+
 def test_cross_refs_dedupe_and_skip_mine(fake):
     def ev(n, login, body, pr=True):
         src = {"html_url": f"https://github.com/acme/widgets/{'pull' if pr else 'issues'}/{n}", "user": {"login": login}, "body": body}

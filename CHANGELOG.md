@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.7] - 2026-10-14
+
+- A PR in a repo with issues turned off is watched instead of reported as gone. GitHub answers
+  every `issues/` path there with 404 while `pulls/` still reads, so `explain` said "not found"
+  and a run could not follow the PR. The item now reads through `pulls/N`, without the issue
+  comments and cross-references GitHub will not serve there; reviews still alert. When such a
+  repo's check and status reads also 404, CI is none instead of unknown. Anywhere else a CI 404
+  is still unknown, never "passed".
+
 ## [0.4.6] - 2026-10-10
 
 - A mention alerts only when something new names you. GitHub keeps a thread's reason "mention" for
