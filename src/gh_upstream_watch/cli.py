@@ -546,9 +546,20 @@ def _days(iso, now):
     return (now - core._epoch(iso)) / 86400 if iso else None
 
 
+def _gates(fp, me):
+    """(yours, taken): an open gate is your move, unless someone else is assigned and you are not
+    (semantic-router#5574: another contributor's /assign took it). Then it waits on them."""
+    by = [g["by"] for g in fp.get("gates", {}).values() if not g.get("done") and not g.get("bot")]
+    assignees = fp.get("assignees", [])
+    others = [] if (me or "").lower() in {a.lower() for a in assignees} else assignees  # GitHub logins ignore case
+    if others:
+        return [], [f"ACCEPTED by @{b}; taken by " + ", ".join("@" + u for u in others) for b in by]
+    return [f"ACCEPTED by @{b}: your move" for b in by], []
+
+
 def _you_reasons(fp, me, by_design):
     """What waits on you on one item, as a list of reasons (empty: nothing)."""
-    why = [f"ACCEPTED by @{g['by']}: your move" for g in fp.get("gates", {}).values() if not g.get("done") and not g.get("bot")]
+    why, taken = _gates(fp, me)
     if fp.get("mention_at") and fp["mention_at"] > (fp.get("my_at") or ""):  # ISO 8601 UTC sorts as time
         why.append("unanswered mention")
     if fp.get("author") == me:
@@ -562,8 +573,10 @@ def _you_reasons(fp, me, by_design):
         cr = fp.get("changes_requested")
         if cr and max(fp.get("my_at") or "", fp.get("pushed_at") or "") < cr["at"]:  # ISO 8601 UTC sorts as time
             why.append("changes requested by " + ", ".join("@" + u for u in cr["by"]))
-        # The last word is a maintainer's, with no @you (Switchyard#855): still yours to answer.
-        if not why and (fp.get("said_at") or "") > (fp.get("my_at") or fp.get("created_at") or ""):
+        # The last word is a maintainer's, with no @you (Switchyard#855): still yours to answer. Not on a taken
+        # item, where that word is the /accept someone else answered.
+        # ponytail: so a later un-@ question there is missed; store the gate's time if that bites.
+        if not why and not taken and (fp.get("said_at") or "") > (fp.get("my_at") or fp.get("created_at") or ""):
             why.append("maintainer replied after you")
     return why
 
@@ -601,7 +614,8 @@ def inbox_rows(st, me, now, by_design=lambda repo: {}):
         touch = _days(fp.get("their_at"), now)
         pace = st.get("pace", {}).get(key.partition("#")[0], {}).get("p90") if fp.get("pr") else None  # merge pace: PRs only
         days = lambda d: core.plural(int(d), "day")  # noqa: E731
-        text = f"waiting {days(waited)}; " + (f"last maintainer touch {days(touch)} ago" if touch is not None else "no maintainer touch yet")
+        text = "".join(t + "; " for t in _gates(fp, me)[1]) + f"waiting {days(waited)}; "
+        text += (f"last maintainer touch {days(touch)} ago" if touch is not None else "no maintainer touch yet")
         ci_state, _, gated = core.ci_view(fp.get("ci"), bd)
         if ci_state == "approval":
             text += "; CI waits for a maintainer to approve the workflow runs"
