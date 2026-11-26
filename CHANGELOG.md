@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.8] - 2026-11-26
+
+- An accepted issue someone else is assigned to is theirs, not your move. semantic-router#5574
+  read "ACCEPTED by @1fanwang: your move" for six days after another contributor commented
+  `/assign` and was assigned. The gate now reads "ACCEPTED by @maint; taken by @user" under
+  waiting on them (the login match ignores case), and the maintainer-replied fallback skips it.
+  Assignees come from the existing issue fetch; no new API calls.
+- Releases publish with `pypa/gh-action-pypi-publish` v1.14.3 (GHSA-5xjx-3w67-w9x9: a revoked
+  CA in the chain Sigstore uses for trusted publishing and attestations).
+
 ## [0.4.7] - 2026-10-14
 
 - A PR in a repo with issues turned off is watched instead of reported as gone. GitHub answers
