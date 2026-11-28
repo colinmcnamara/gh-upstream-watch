@@ -56,6 +56,36 @@ def mentions(body, login):
     return re.search(r"(?i)(?<![\w-])@" + re.escape(login) + r"(?![\w-])", body or "") is not None
 
 
+ROLL_CALL = 10  # ponytail: fixed count of distinct @logins; per-repo if a team pings ten reviewers by hand
+
+
+def addressed(body, login):
+    """@login in a comment that is not a roll call. One that @-names ROLL_CALL or more people asks nobody
+    in particular (semantic-router#2967's weekly outreach names every workgroup member)."""
+    return mentions(body, login) and not roll_call(body)
+
+
+def roll_call(body):
+    """True when body @-names ROLL_CALL or more distinct logins."""
+    return len({m.lower() for m in re.findall(r"(?<![\w-])@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?![\w-])",
+                                              body or "")}) >= ROLL_CALL
+
+
+def thread_replies(inline, me, bots=()):
+    """Others' inline review comments posted after your first comment in the same review thread. A reply
+    on a thread you wrote in never needs @you (agentic-ai-usecases-requirements#87: the editor answered
+    both review comments with no mention). GitHub points every reply's in_reply_to_id at the thread's
+    first comment."""
+    first: dict[int, str] = {}
+    for c in inline:
+        if who(c) == me:
+            root, at = c.get("in_reply_to_id") or c["id"], c.get("created_at") or ""
+            first[root] = min(first.get(root, at), at)
+    return [c for c in inline if who(c) != me and not is_bot(who(c), bots)
+            and (root := c.get("in_reply_to_id") or c["id"]) in first and (c.get("created_at") or "") > first[root]
+            and not roll_call(visible(c.get("body")))]
+
+
 # More targets after the first: "Closes #5, #6 and acme/x#7".
 MORE_RE = re.compile(r"\s*(?:,|&|\band\b)\s*(?:https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/|([\w.-]+/[\w.-]+)#|#)(\d+)(?!\d)", re.I)
 
@@ -146,6 +176,7 @@ def remembered(mergers, now):
 def _fingerprint(i, repo, n, me, rules, bots, mergers):
     comments = github.paginate(f"repos/{repo}/issues/{n}/comments") if i.get("comments") else []
     others = [c for c in comments if who(c) != me]
+    asks = [c for c in others if addressed(visible(c.get("body")), me)]  # naming you where it shows; no roll calls
     humans = [c["id"] for c in others if not is_bot(who(c), bots)]
     mine = [c for c in comments if who(c) == me]
     # A maintainer's touch: the latest comment (or, below, review) by a trusted human who is not you,
@@ -163,19 +194,19 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         "assignees": sorted(a["login"] for a in i.get("assignees") or []),
         "comments": len(comments),
         "human_comments": len(humans),
-        "mentions_me": sum(1 for c in others if mentions(c.get("body"), me)),
+        "mentions_me": len(asks),
         # Ids, not counts: a deleted comment cannot hide a new one. Ids only grow, so the newest
         # KEEP_IDS are enough to count what arrived since the last run.
         "max_comment_id": max((c["id"] for c in comments), default=0),
         "human_ids": humans[-KEEP_IDS:],
-        "mention_ids": [c["id"] for c in others if mentions(c.get("body"), me)],  # few: no cap, so edits are seen
+        "mention_ids": [c["id"] for c in asks],  # few: no cap, so edits are seen
         "gates": {},
         "xrefs": [] if i.get("issues_off") else cross_refs(repo, n, me),
         "author": who(i), "created_at": i.get("created_at"),
         "my_at": max((c.get("created_at") or "" for c in mine), default=None),
         # When the latest comment naming you was written. Not edited: a roll call re-edited weekly is not
         # a new ask (an edit that adds @you still alerts through notifications and mention_ids).
-        "mention_at": max((c.get("created_at") or "" for c in others if mentions(c.get("body"), me)), default=None),
+        "mention_at": max((c.get("created_at") or "" for c in asks), default=None),
         "names_me": who(i) != me and mentions(visible(i.get("body")), me),
     }
     for g in rules["gates"]:
@@ -198,6 +229,7 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         # Review ids, not (reviewer, state) pairs: a second approval after changes-requested is new.
         # Not yours: a reply on a review thread is recorded as your own COMMENTED review. It is still a reply.
         fp["my_at"] = max([fp["my_at"] or ""] + [r.get("submitted_at") or "" for r in reviews if who(r) == me]) or None
+        reviewed = any(who(r) == me for r in reviews)
         reviews = [r for r in reviews if who(r) != me]
         fp["reviews"] = sorted([r["id"], who(r), r["state"]] for r in reviews if not is_bot(who(r), bots))
         # "dirty" is a conflict; "unknown" (GitHub still computing) is None, and the run keeps the last answer.
@@ -215,13 +247,22 @@ def _fingerprint(i, repo, n, me, rules, bots, mergers):
         unlabeled += [(r.get("submitted_at"), who(r), r["state"] == "COMMENTED") for r in reviews
                       if r.get("author_association") == "CONTRIBUTOR" and not is_bot(who(r), bots)]
         # Mentions in review bodies and inline review comments (semantic-router#4658). Inline comments
-        # cost a call, so only on your own open PR with a human review: elsewhere notifications cover them.
+        # cost a call, so only on an open PR that is yours with a human review, or that you reviewed:
+        # a reply on your review thread names no one, and its notification is not a mention.
         talk = [r for r in reviews if not is_bot(who(r), bots)]
-        if talk and fp["author"] == me and fp["state"] == "open":
-            talk += [c for c in github.paginate(f"repos/{repo}/pulls/{n}/comments")
-                     if who(c) != me and not is_bot(who(c), bots)]
-        named = [x.get("submitted_at") or x.get("created_at") or "" for x in talk if mentions(visible(x.get("body")), me)]
-        fp["mention_at"] = max([fp["mention_at"] or "", *named]) or None
+        replies = []
+        if fp["state"] == "open" and ((talk and fp["author"] == me) or reviewed):
+            inline = github.paginate(f"repos/{repo}/pulls/{n}/comments")
+            talk += [c for c in inline if who(c) != me and not is_bot(who(c), bots)]
+            replies = thread_replies(inline, me, bots)
+            # "r" ids: inline review comments are numbered apart from issue comments.
+            fp["mention_ids"] += [f"r{c['id']}" for c in replies]
+            fp["mentions_me"] += len(replies)
+        # This reading counted every reply to you (none before you review), so the next one can alert on
+        # new ones. A reading saved by 0.4.8 lacks the mark: its first successor seeds quietly.
+        fp["replies_known"] = fp["state"] == "open"
+        named = [x.get("submitted_at") or x.get("created_at") or "" for x in talk if addressed(visible(x.get("body")), me)]
+        fp["mention_at"] = max([fp["mention_at"] or "", *named, *(c.get("created_at") or "" for c in replies)]) or None
         if fp["author"] == me:  # None while closed, so red CI on a reopen is a change, not a first reading
             sha = (pr.get("head") or {}).get("sha")
             try:
@@ -403,8 +444,10 @@ def changes(old, new, me, rules):
             out.append(("reference", msg.get("reference", "referenced by #{number}").format(**fields), url))
     since = old.get("max_comment_id")
     if quiet:
-        # Set difference, not "id > since": an older comment edited to name you counts too.
-        d = (len(set(new.get("mention_ids", [])) - set(old.get("mention_ids", []))) if since is not None
+        # Set difference, not "id > since": an older comment edited to name you counts too. Inline
+        # replies ("r" ids) count only against a reading that counted them, as below.
+        ids = {i for i in new.get("mention_ids", []) if old.get("replies_known") or not str(i).startswith("r")}
+        d = (len(ids - set(old.get("mention_ids", []))) if since is not None
              else new.get("mentions_me", 0) - old.get("mentions_me", 0))
         if d > 0:
             out.append(("mentions", f"{plural(d, 'comment')} naming you", None))
@@ -415,6 +458,11 @@ def changes(old, new, me, rules):
             d = new["human_comments"] - old.get("human_comments", 0) - fired  # a gate comment already alerted
         if d > 0:
             out.append(("comments", f"{plural(d, 'new comment')}", None))
+        # Inline replies are not issue comments: a quiet item counts them above, any other item here.
+        # Not against a reading without the mark (0.4.8 state, a new install): those replies are old.
+        r = len({i for i in new.get("mention_ids", []) if str(i).startswith("r")} - set(old.get("mention_ids", [])))
+        if r > 0 and old.get("replies_known"):
+            out.append(("mentions", f"{r} {'reply' if r == 1 else 'replies'} to your review comments", None))
     return out
 
 
@@ -463,7 +511,7 @@ def who_named_me(n, me, since, budget, record=None):
     if budget[0] <= 0:
         return UNKNOWN
     budget[0] -= 1
-    names = lambda c: mentions(visible(c.get("body")), me) and who(c) != me  # noqa: E731
+    names = lambda c: addressed(visible(c.get("body")), me) and who(c) != me  # noqa: E731
     before = None if record is None else record.get(n.get("id"))  # None: no record yet, go by time
     try:
         found = []
