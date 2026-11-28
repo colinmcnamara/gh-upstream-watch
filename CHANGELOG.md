@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+- A reply on your review thread waits on you. On someone else's open PR you reviewed, an inline
+  comment posted after yours in the same thread now counts as naming you: `explain` counts it,
+  `inbox` lists the PR under waiting on you until you answer, and a run alerts "N replies to your
+  review comments". agentic-ai-usecases-requirements#87 read "0 naming you" after the editor
+  answered both review comments, since a reply carries no @you and its notification is not a
+  mention. One extra call per open PR you reviewed. The first run after upgrading reads the
+  threads without alerting; the inbox still shows anything unanswered.
+- A roll call is not an ask. A comment that @-names ten or more people no longer counts as a
+  mention, in the inbox or in notification lookups: semantic-router#2967's weekly outreach names
+  every workgroup member and kept the issue under waiting on you.
+
 ## [0.4.8] - 2026-11-26
 
 - An accepted issue someone else is assigned to is theirs, not your move. semantic-router#5574
